@@ -197,7 +197,7 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
       )}
 
       <div
-        className={`fixed bottom-0 inset-x-0 z-40 border-t border-white/10 bg-neutral-950/95 backdrop-blur ${
+        className={`glass fixed inset-x-0 bottom-[68px] z-40 border-t border-separator sm:bottom-0 ${
           full ? 'hidden' : ''
         }`}
       >
@@ -206,30 +206,30 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
           onClick={() => setFull(true)}
           aria-label="Play fullscreen"
           title="Play fullscreen"
-          className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-md sm:h-14 sm:w-14"
+          className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-[8px] shadow-sm shadow-black/40 sm:h-14 sm:w-14"
         >
           {track.artwork ? (
             <img src={track.artwork} alt="" className="h-full w-full object-cover" />
           ) : (
-            <div className="grid h-full w-full place-items-center bg-white/10 text-neutral-400">
+            <div className="grid h-full w-full place-items-center bg-fill text-label-3">
               <TbMusic size={22} />
             </div>
           )}
-          <span className="absolute inset-0 grid place-items-center bg-black/50 text-white opacity-0 transition group-hover:opacity-100">
+          <span className="absolute inset-0 grid place-items-center bg-black/55 text-white opacity-0 transition group-hover:opacity-100">
             <TbArrowsMaximize size={20} />
           </span>
         </button>
 
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{track.title}</div>
-          <div className="truncate text-xs text-neutral-400">
+          <div className="truncate text-[15px] font-medium">{track.title}</div>
+          <div className="truncate text-[13px] text-label-2">
             {track.artist}
             {isPreview(track) ? ' · 30s preview' : ''}
           </div>
-          {error && <div className="truncate text-xs text-red-400">{error}</div>}
+          {error && <div className="truncate text-[13px] text-accent">{error}</div>}
 
           <div className="mt-1.5 flex items-center gap-2">
-            <span className="w-9 text-right text-[10px] tabular-nums text-neutral-500">{fmtTime(time)}</span>
+            <span className="w-9 text-right text-[11px] tabular-nums text-label-3">{fmtTime(time)}</span>
             <input
               type="range"
               min={0}
@@ -237,10 +237,10 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
               value={time}
               step={0.1}
               onChange={(e) => seek(Number(e.target.value))}
-              className="h-1 flex-1 accent-red-500"
+              className="h-1 flex-1 accent-[var(--color-accent)]"
               aria-label="Seek"
             />
-            <span className="w-9 text-[10px] tabular-nums text-neutral-500">{fmtTime(seekMax)}</span>
+            <span className="w-9 text-[11px] tabular-nums text-label-3">{fmtTime(seekMax)}</span>
           </div>
         </div>
 
@@ -256,7 +256,7 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
           <button
             onClick={() => setPlaying(!playing)}
             aria-label={playing ? 'Pause' : 'Play'}
-            className="grid h-10 w-10 place-items-center rounded-full bg-white text-black transition hover:scale-105"
+            className="grid h-11 w-11 place-items-center rounded-full bg-label text-base transition hover:scale-105 active:scale-95"
           >
             {playing ? <TbPlayerPauseFilled size={18} /> : <TbPlayerPlayFilled size={18} className="ml-0.5" />}
           </button>
@@ -269,7 +269,7 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
             </Btn>
           </span>
           <span className="ml-2 hidden items-center gap-2 sm:flex">
-            <TbVolume className="shrink-0 text-neutral-400" />
+            <TbVolume className="shrink-0 text-label-2" />
             <input
               type="range"
               min={0}
@@ -277,7 +277,7 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
               step={0.01}
               value={volume}
               onChange={(e) => setVolume(Number(e.target.value))}
-              className="h-1 w-20 accent-red-500"
+              className="h-1 w-20 accent-[var(--color-accent)]"
               aria-label="Volume"
             />
           </span>
@@ -304,8 +304,8 @@ function Btn({
       onClick={onClick}
       aria-label={label}
       aria-pressed={active}
-      className={`grid h-8 w-8 place-items-center rounded-full text-base transition hover:bg-white/10 ${
-        active ? 'text-red-500' : 'text-neutral-300'
+      className={`grid h-11 w-11 place-items-center rounded-full text-base transition hover:bg-fill active:scale-95 ${
+        active ? 'text-accent' : 'text-label-2 hover:text-label'
       }`}
     >
       {children}
@@ -362,7 +362,7 @@ function FullView({
   const [showQueue, setShowQueue] = useState(() => window.innerWidth >= 1024);
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-neutral-950 text-neutral-100">
+    <div className="fixed inset-0 z-50 overflow-hidden bg-base text-white">
       {/* The cover doubles as its own backdrop — the ambient wash with no colour API. */}
       {art && (
         <img
@@ -372,14 +372,16 @@ function FullView({
           className="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover blur-3xl saturate-150"
         />
       )}
-      <div className="pointer-events-none absolute inset-0 bg-neutral-950/60" />
+      {/* The Clear variant floats over media; artwork can be bright, so it gets a
+          dimming layer to keep the controls legible (HIG — Liquid Glass > Clear). */}
+      <div className="pointer-events-none absolute inset-0 bg-black/55" />
 
       <button
         onClick={() => setShowQueue(!showQueue)}
         aria-label={showQueue ? 'Hide queue' : 'Show queue'}
         aria-expanded={showQueue}
         title={showQueue ? 'Hide queue' : 'Show queue'}
-        className="absolute left-5 top-5 z-30 grid h-10 w-10 place-items-center rounded-full bg-white/10 backdrop-blur transition hover:bg-white/20"
+        className="absolute left-5 top-5 z-30 grid h-11 w-11 place-items-center rounded-full bg-white/15 backdrop-blur-xl transition hover:bg-white/25 active:scale-95"
       >
         {showQueue ? <TbChevronLeft size={20} /> : <TbPlaylist size={18} />}
       </button>
@@ -387,15 +389,15 @@ function FullView({
       <button
         onClick={onClose}
         aria-label="Close"
-        className="absolute right-5 top-5 z-20 grid h-10 w-10 place-items-center rounded-full bg-white/10 backdrop-blur transition hover:bg-white/20"
+        className="absolute right-5 top-5 z-20 grid h-11 w-11 place-items-center rounded-full bg-white/15 backdrop-blur-xl transition hover:bg-white/25 active:scale-95"
       >
         <TbX size={20} />
       </button>
 
       <div className="relative z-10 flex h-full">
         {showQueue && (
-        <aside className="absolute inset-y-0 left-0 z-20 flex w-[min(18rem,85vw)] shrink-0 flex-col border-r border-white/10 bg-black/60 backdrop-blur-xl lg:relative lg:z-10 lg:bg-black/30">
-          <h3 className="px-5 pb-3 pt-20 text-xs font-semibold uppercase tracking-wider text-neutral-400">
+        <aside className="absolute inset-y-0 left-0 z-20 flex w-[min(18rem,85vw)] shrink-0 flex-col border-r border-white/10 bg-black/55 backdrop-blur-2xl lg:relative lg:z-10 lg:bg-black/30">
+          <h3 className="px-5 pb-3 pt-20 text-[13px] font-semibold uppercase tracking-wider text-white/60">
             Playing next · {queue.length}
           </h3>
           <ol className="min-h-0 flex-1 overflow-y-auto pb-6">
@@ -406,33 +408,35 @@ function FullView({
                   <button
                     onClick={() => setIndex(i)}
                     aria-current={current}
-                    className={`flex w-full items-center gap-3 px-5 py-2 text-left transition hover:bg-white/10 ${
-                      current ? 'bg-white/15' : i < index ? 'opacity-40' : ''
+                    className={`flex min-h-14 w-full items-center gap-3 px-5 py-2 text-left transition hover:bg-white/10 ${
+                      current ? 'bg-white/15' : i < index ? 'opacity-50' : ''
                     }`}
                   >
-                    <span className="grid w-4 shrink-0 place-items-center text-[10px] tabular-nums text-neutral-400">
+                    <span className="grid w-4 shrink-0 place-items-center text-[11px] tabular-nums text-white/60">
                       {current ? (
                         playing ? (
-                          <TbPlayerPlayFilled className="text-red-500" />
+                          <TbPlayerPlayFilled className="text-accent" />
                         ) : (
-                          <TbPlayerPauseFilled className="text-red-500" />
+                          <TbPlayerPauseFilled className="text-accent" />
                         )
                       ) : (
                         i + 1
                       )}
                     </span>
                     {t.artwork ? (
-                      <img src={t.artwork} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />
+                      <img src={t.artwork} alt="" className="h-10 w-10 shrink-0 rounded-[6px] object-cover" />
                     ) : (
-                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded bg-white/10 text-neutral-400">
+                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[6px] bg-white/10 text-white/50">
                         <TbMusic size={16} />
                       </span>
                     )}
                     <span className="min-w-0 flex-1">
-                      <span className={`block truncate text-xs ${current ? 'font-semibold' : ''}`}>{t.title}</span>
-                      <span className="block truncate text-[11px] text-neutral-400">{t.artist}</span>
+                      <span className={`block truncate text-[14px] ${current ? 'font-semibold' : ''}`}>
+                        {t.title}
+                      </span>
+                      <span className="block truncate text-[12px] text-white/60">{t.artist}</span>
                     </span>
-                    <span className="shrink-0 text-[10px] tabular-nums text-neutral-500">{fmtTime(t.duration)}</span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-white/50">{fmtTime(t.duration)}</span>
                   </button>
                 </li>
               );
@@ -447,27 +451,27 @@ function FullView({
               <img
                 src={art}
                 alt={`${track.album || track.title} cover`}
-                className="aspect-square w-[min(46vh,78vw)] rounded-2xl object-cover shadow-2xl shadow-black/60"
+                className="aspect-square w-[min(46vh,78vw)] rounded-sheet object-cover shadow-2xl shadow-black/70 ring-1 ring-white/10"
               />
             ) : (
-              <div className="grid aspect-square w-[min(46vh,78vw)] place-items-center rounded-2xl bg-white/10 text-neutral-400">
+              <div className="grid aspect-square w-[min(46vh,78vw)] place-items-center rounded-sheet bg-white/10 text-white/40 ring-1 ring-white/10">
                 <TbMusic size={96} />
               </div>
             )}
 
             <div className="mt-6 w-full text-center">
-              <h2 className="truncate text-2xl font-semibold">{track.title}</h2>
-              <p className="mt-1 truncate text-sm text-neutral-300">
+              <h2 className="truncate text-[26px] font-bold tracking-tight">{track.title}</h2>
+              <p className="mt-1 truncate text-[17px] text-white/70">
                 {track.artist}
                 {isPreview(track) ? ' · 30s preview' : ''}
               </p>
-              {track.album && <p className="mt-0.5 truncate text-xs text-neutral-400">{track.album}</p>}
-              {loading && <p className="mt-2 text-xs text-neutral-400">Loading…</p>}
-              {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+              {track.album && <p className="mt-0.5 truncate text-[14px] text-white/50">{track.album}</p>}
+              {loading && <p className="mt-2 text-[13px] text-white/60">Loading…</p>}
+              {error && <p className="mt-2 text-[15px] text-accent">{error}</p>}
             </div>
 
             <div className="mt-5 flex w-full items-center gap-3">
-              <span className="w-10 text-right text-xs tabular-nums text-neutral-400">{fmtTime(time)}</span>
+              <span className="w-10 text-right text-[12px] tabular-nums text-white/60">{fmtTime(time)}</span>
               <input
                 type="range"
                 min={0}
@@ -478,7 +482,7 @@ function FullView({
                 className="h-1 flex-1 accent-white"
                 aria-label="Seek"
               />
-              <span className="w-10 text-xs tabular-nums text-neutral-400">{fmtTime(dur)}</span>
+              <span className="w-10 text-[12px] tabular-nums text-white/60">{fmtTime(dur)}</span>
             </div>
 
             <div className="mt-5 flex items-center gap-5">
@@ -491,7 +495,7 @@ function FullView({
               <button
                 onClick={() => setPlaying(!playing)}
                 aria-label={playing ? 'Pause' : 'Play'}
-                className="grid h-16 w-16 place-items-center rounded-full bg-white text-black transition hover:scale-105"
+                className="grid h-16 w-16 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 transition hover:scale-105 active:scale-95"
               >
                 {playing ? <TbPlayerPauseFilled size={26} /> : <TbPlayerPlayFilled size={26} className="ml-1" />}
               </button>
@@ -504,7 +508,7 @@ function FullView({
             </div>
 
             <span className="mt-6 hidden items-center gap-2 sm:flex">
-              <TbVolume className="shrink-0 text-neutral-400" />
+              <TbVolume className="shrink-0 text-white/60" />
               <input
                 type="range"
                 min={0}
@@ -516,7 +520,7 @@ function FullView({
                 aria-label="Volume"
               />
             </span>
-            <p className="mt-4 hidden text-[11px] text-neutral-500 sm:block">Space to play or pause · Esc to close</p>
+            <p className="mt-4 hidden text-[12px] text-white/50 sm:block">Space to play or pause · Esc to close</p>
           </div>
         </div>
       </div>

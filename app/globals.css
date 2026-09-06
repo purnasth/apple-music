@@ -5,6 +5,34 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Semantic tokens, named for their purpose rather than their value, so the palette
+   can shift without hunting down literals (HIG — Color > System colors).
+   Dark-only is the sanctioned exception for immersive media apps (HIG — Dark Mode).
+
+   Backgrounds come in two levels: base recedes, elevated advances. Labels come in
+   three vibrancy levels, each checked against #000: 19.8:1, 7.3:1, 5.6:1 — all clear
+   the 4.5:1 body-text minimum (HIG — Accessibility > color contrast). */
+@theme {
+  --color-base: #000000;
+  --color-elevated: #1c1c1e;
+  --color-elevated-2: #2c2c2e;
+
+  --color-label: #f5f5f7;
+  --color-label-2: #98989f;
+  --color-label-3: #7c7c84;
+
+  --color-fill: rgba(120, 120, 128, 0.2);
+  --color-fill-2: rgba(120, 120, 128, 0.28);
+  --color-separator: rgba(84, 84, 88, 0.5);
+
+  --color-accent: #fa243c;
+
+  /* Three radii, not the seven the markup had grown. */
+  --radius-control: 10px;
+  --radius-card: 14px;
+  --radius-sheet: 20px;
+}
+
 html {
   color-scheme: dark;
   /* Stop Safari inflating text on rotation. */
@@ -13,6 +41,48 @@ html {
 
 body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background: var(--color-base);
+  color: var(--color-label);
+}
+
+/* The functional layer — bars, toolbars, popovers — floats above the content layer
+   and takes its colour from whatever scrolls beneath (HIG — Liquid Glass). Blur and
+   opacity sit in the ranges that keep controls legible over arbitrary artwork:
+   30px blur, 0.72 opacity, saturation boosted so colour still reads through.
+
+   Written as @utility rather than a plain rule: Lightning CSS drops a hand-authored
+   backdrop-filter here, but keeps the one Tailwind's own utilities compose. */
+@utility glass {
+  @apply bg-base/72 backdrop-blur-[30px] backdrop-saturate-[1.8];
+}
+
+/* Popovers sit over content rather than a screen edge, so they take the opaquer
+   "regular" variant to stay readable (HIG — Liquid Glass > Regular). */
+@utility glass-thick {
+  @apply bg-elevated/88 backdrop-blur-[30px] backdrop-saturate-[1.8];
+}
+
+/* Transparency is decoration, not information: honour the system setting. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass {
+    background: var(--color-base);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .glass-thick {
+    background: var(--color-elevated);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
 
 /* Keep the seek/volume thumbs visible on the dark player bar. */
@@ -28,4 +98,12 @@ input[type="range"] {
   textarea {
     font-size: 16px;
   }
+}
+
+/* Reach for the keyboard and the focus ring is there; reach for the mouse and it
+   is not (HIG — Accessibility). */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
