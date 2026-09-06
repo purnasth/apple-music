@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Track, audioSrc, fmtTime, isPreview } from '@/lib/music';
+import { Track, audioSrc, fmtTime, isPreview, shuffled } from '@/lib/music';
 
 type Props = {
   queue: Track[];
@@ -22,26 +22,36 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
 
-  const next = () => {
+  // A fixed shuffled order, not a fresh random pick each time: picking randomly on every
+  // skip can repeat a track while others never play, and makes Previous meaningless.
+  // Rebuilt when shuffle is switched on or the queue changes, current track first.
+  useEffect(() => {
+    if (!shuffle) return setOrder(null);
+    const rest = queue.map((_, i) => i).filter((i) => i !== index);
+    setOrder([index, ...shuffled(rest)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shuffle, queue]);
+
+  /** Walk the play order, which is the shuffled one when shuffle is on. */
+  const step = (delta: 1 | -1) => {
     if (!queue.length) return;
-    if (shuffle && queue.length > 1) {
-      let n = index;
-      while (n === index) n = Math.floor(Math.random() * queue.length);
-      setIndex(n);
-      return;
-    }
-    if (index + 1 < queue.length) setIndex(index + 1);
-    else if (repeat) setIndex(0);
-    else setPlaying(false);
+    const path = order ?? queue.map((_, i) => i);
+    const at = Math.max(path.indexOf(index), 0) + delta;
+    if (at >= path.length) return repeat ? setIndex(path[0]) : setPlaying(false);
+    setIndex(path[at < 0 ? path.length - 1 : at]);
   };
+
+  const next = () => step(1);
 
   const prev = () => {
     const a = audioRef.current;
+    // Restart the track first, the way every player does, before stepping back.
     if (a && a.currentTime > 3) return void (a.currentTime = 0);
-    setIndex(index > 0 ? index - 1 : Math.max(queue.length - 1, 0));
+    step(-1);
   };
 
   // Load the source whenever the track changes. Local tracks come out of IndexedDB

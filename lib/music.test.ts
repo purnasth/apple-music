@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { search, fmtTime, folderOf } from './music.ts';
+import { search, fmtTime, folderOf, shuffled } from './music.ts';
 
 test('fmtTime formats and survives junk', () => {
   assert.equal(fmtTime(0), '--:--');
@@ -8,6 +8,22 @@ test('fmtTime formats and survives junk', () => {
   assert.equal(fmtTime(605), '10:05');
   assert.equal(fmtTime(undefined), '--:--');
   assert.equal(fmtTime(Infinity), '--:--');
+});
+
+test('shuffled is a permutation, never a resample', () => {
+  const src = Array.from({ length: 200 }, (_, i) => i);
+  for (let run = 0; run < 20; run++) {
+    const out = shuffled(src);
+    assert.equal(out.length, src.length);
+    // Every element exactly once — the property naive random picking violates.
+    assert.deepEqual([...out].sort((a, b) => a - b), src);
+  }
+  assert.deepEqual(shuffled([]), []);
+  assert.deepEqual(shuffled([7]), [7]);
+  // The input is left alone.
+  const orig = [1, 2, 3];
+  shuffled(orig);
+  assert.deepEqual(orig, [1, 2, 3]);
 });
 
 test('folderOf picks the immediate parent of a folder-picked file', () => {

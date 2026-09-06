@@ -230,6 +230,19 @@ export function savePlaylists(p: Playlists) {
   localStorage.setItem(PL_KEY, JSON.stringify(clean));
 }
 
+/**
+ * Fisher-Yates. Repeatedly picking a random index — the obvious approach — can play the
+ * same track twice before others play at all; a permutation plays each exactly once.
+ */
+export function shuffled<T>(items: T[]): T[] {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export const fmtTime = (s?: number) => {
   if (!s || !isFinite(s)) return '--:--';
   const m = Math.floor(s / 60);

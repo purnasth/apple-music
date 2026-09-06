@@ -13,9 +13,20 @@ import {
   getPlaylists,
   savePlaylists,
   fmtTime,
+  shuffled,
 } from '@/lib/music';
 
 type Tab = 'search' | 'library' | 'playlists';
+
+type SortKey = 'artist' | 'title' | 'album' | 'longest' | 'shortest';
+
+const SORTS: Record<SortKey, (a: Track, b: Track) => number> = {
+  artist: (a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title),
+  title: (a, b) => a.title.localeCompare(b.title),
+  album: (a, b) => (a.album || '~').localeCompare(b.album || '~') || a.title.localeCompare(b.title),
+  longest: (a, b) => (b.duration ?? 0) - (a.duration ?? 0),
+  shortest: (a, b) => (a.duration ?? 0) - (b.duration ?? 0),
+};
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>('search');
@@ -28,6 +39,9 @@ export default function Home() {
   const [library, setLibrary] = useState<Track[]>([]);
   const [importing, setImporting] = useState<string | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
+  const [artist, setArtist] = useState<string>('');
+  const [filter, setFilter] = useState('');
+  const [sort, setSort] = useState<SortKey>('artist');
 
   const [playlists, setPlaylists] = useState<Playlists>({});
   const [active, setActive] = useState<string | null>(null);
@@ -71,6 +85,9 @@ export default function Home() {
     setPlaying(true);
   };
 
+  // A folder change can strand an artist selection that folder has no tracks for.
+  useEffect(() => setArtist(''), [folder]);
+
   const updatePlaylists = (next: Playlists) => {
     setPlaylists(next);
     savePlaylists(next);
@@ -94,7 +111,19 @@ export default function Home() {
   }, []);
 
   const folders = [...new Set(library.map((t) => t.folder).filter(Boolean as unknown as (f?: string) => f is string))].sort();
-  const inLibrary = folder ? library.filter((t) => t.folder === folder) : library;
+
+  // Artists of the tracks in the chosen folder, so the list narrows as you filter.
+  const artists = [...new Set(library.filter((t) => !folder || t.folder === folder).map((t) => t.artist))].sort((a, b) =>
+    a.localeCompare(b)
+  );
+
+  const needle = filter.trim().toLowerCase();
+  const inLibrary = library
+    .filter((t) => !folder || t.folder === folder)
+    .filter((t) => !artist || t.artist === artist)
+    .filter((t) => !needle || `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(needle))
+    .sort(SORTS[sort]);
+
   const shown = tab === 'search' ? results : tab === 'library' ? inLibrary : active ? playlists[active] ?? [] : [];
 
   return (
@@ -137,19 +166,94 @@ export default function Home() {
           <DropZone onFiles={onFiles} importing={importing} />
         )}
 
-        {tab === 'library' && folders.length > 1 && (
-          <div className="mb-4 flex flex-wrap gap-2">
-            {[null, ...folders].map((f) => (
-              <button
-                key={f ?? '__all'}
-                onClick={() => setFolder(f)}
-                className={`rounded-full px-3 py-1 text-xs transition ${
-                  folder === f ? 'bg-white text-neutral-900' : 'bg-white/10 text-neutral-400 hover:bg-white/20'
-                }`}
+        {tab === 'library' && !!library.length && (
+          <div className="mb-4 space-y-3">
+            {folders.length > 1 && (
+              <div className="flex flex-wrap gap-2">
+                {[null, ...folders].map((f) => (
+                  <button
+                    key={f ?? '__all'}
+                    onClick={() => setFolder(f)}
+                    className={`rounded-full px-3 py-1 text-xs transition ${
+                      folder === f ? 'bg-white text-neutral-900' : 'bg-white/10 text-neutral-400 hover:bg-white/20'
+                    }`}
+                  >
+                    {f ?? 'All'} ({f ? library.filter((t) => t.folder === f).length : library.length})
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter title, artist, album…"
+                aria-label="Filter library"
+                className="min-w-40 flex-1 rounded-full bg-white/10 px-4 py-1.5 text-xs outline-none placeholder:text-neutral-500 focus:bg-white/15"
+              />
+
+              <select
+                value={artist}
+                onChange={(e) => setArtist(e.target.value)}
+                aria-label="Artist"
+                className="rounded-full bg-white/10 px-3 py-1.5 text-xs outline-none focus:bg-white/15"
               >
-                {f ?? 'All'} ({f ? library.filter((t) => t.folder === f).length : library.length})
+                <option value="">All artists ({artists.length})</option>
+                {artists.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as SortKey)}
+                aria-label="Sort by"
+                className="rounded-full bg-white/10 px-3 py-1.5 text-xs outline-none focus:bg-white/15"
+              >
+                <option value="artist">Artist</option>
+                <option value="title">Title</option>
+                <option value="album">Album</option>
+                <option value="longest">Longest first</option>
+                <option value="shortest">Shortest first</option>
+              </select>
+
+              <button
+                onClick={() => inLibrary.length && play(inLibrary, 0)}
+                disabled={!inLibrary.length}
+                className="rounded-full bg-white px-4 py-1.5 text-xs font-medium text-neutral-900 transition hover:bg-neutral-200 disabled:opacity-40"
+              >
+                ▶ Play
               </button>
-            ))}
+              <button
+                onClick={() => inLibrary.length && play(shuffled(inLibrary), 0)}
+                disabled={!inLibrary.length}
+                title="Play these in a random order"
+                className="rounded-full bg-white/10 px-4 py-1.5 text-xs transition hover:bg-white/20 disabled:opacity-40"
+              >
+                ⇄ Shuffle
+              </button>
+            </div>
+
+            {(!!needle || !!artist) && (
+              <p className="text-[11px] text-neutral-500">
+                {inLibrary.length} of {library.length} tracks
+                {artist && ` · ${artist}`}
+                {(needle || artist) && (
+                  <button
+                    onClick={() => {
+                      setFilter('');
+                      setArtist('');
+                    }}
+                    className="ml-2 underline underline-offset-2 hover:text-neutral-300"
+                  >
+                    clear
+                  </button>
+                )}
+              </p>
+            )}
           </div>
         )}
 
