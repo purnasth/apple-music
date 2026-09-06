@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# the song library: audio you drop in, plus the covers and manifest generated from it.
+# Deployed as static assets straight from the build, never committed (840 MB).
+/public/songs/
+/public/songs-art/
+/public/songs.json

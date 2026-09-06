@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Track, audioSrc, fmtTime } from '@/lib/music';
+import { Track, audioSrc, fmtTime, isPreview } from '@/lib/music';
 
 type Props = {
   queue: Track[];
@@ -118,7 +118,7 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
           <div className="truncate text-sm font-medium">{track.title}</div>
           <div className="truncate text-xs text-neutral-400">
             {track.artist}
-            {track.local ? '' : ' · 30s preview'}
+            {isPreview(track) ? ' · 30s preview' : ''}
           </div>
           {error && <div className="truncate text-xs text-red-400">{error}</div>}
 

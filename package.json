@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test lib/*.test.ts"
+    "test": "node --experimental-strip-types --test lib/*.test.ts",
+    "songs": "node scripts/build-songs.mjs",
+    "deploy": "npm run songs && npm run build && npx wrangler deploy"
   },
   "dependencies": {
     "idb-keyval": "^6.3.0",
