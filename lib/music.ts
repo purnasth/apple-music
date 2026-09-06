@@ -187,6 +187,18 @@ export async function audioSrc(track: Track, signal?: AbortSignal): Promise<stri
     const file = await get<File>(track.id, blobs());
     return file ? URL.createObjectURL(file) : undefined;
   }
+
+  // Cloudflare's static assets answer a Range request with the whole file and no
+  // Accept-Ranges, so the browser cannot seek — currentTime past the buffer refetches
+  // from byte 0 and playback restarts. preload="auto" is not enough: Chrome buffers
+  // ahead, not to the end (measured 0-169s of a 276s track). Downloading once into a
+  // blob buffers the whole file, so every seek is local. Under a second per track.
+  if (track.id.startsWith('file:') && track.preview) {
+    const res = await fetch(track.preview, { signal });
+    if (!res.ok) throw new Error(`Could not load audio (${res.status})`);
+    return URL.createObjectURL(await res.blob());
+  }
+
   if (!expired(track.preview)) return track.preview;
   const id = track.id.startsWith('deezer:') ? track.id.slice(7) : undefined;
   if (!id) return track.preview;

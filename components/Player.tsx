@@ -21,6 +21,7 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
   const [shuffle, setShuffle] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const track = queue[index];
 
@@ -51,14 +52,18 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
     setTime(0);
     if (!track) return;
 
-    audioSrc(track).then((src) => {
-      if (cancelled || !audioRef.current) return;
-      if (!src) return setError('No playable audio for this track.');
-      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-      objectUrl.current = src.startsWith('blob:') ? src : null;
-      audioRef.current.src = src;
-      if (playing) audioRef.current.play().catch(() => setPlaying(false));
-    });
+    setLoading(true);
+    audioSrc(track)
+      .then((src) => {
+        if (cancelled || !audioRef.current) return;
+        if (!src) return setError('No playable audio for this track.');
+        if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+        objectUrl.current = src.startsWith('blob:') ? src : null;
+        audioRef.current.src = src;
+        if (playing) audioRef.current.play().catch(() => setPlaying(false));
+      })
+      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : 'Could not load audio.'))
+      .finally(() => !cancelled && setLoading(false));
 
     return () => {
       cancelled = true;
@@ -96,41 +101,28 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
 
   useEffect(() => () => void (objectUrl.current && URL.revokeObjectURL(objectUrl.current)), []);
 
-  const openFull = async () => {
-    setFull(true);
-    // Failing here is fine: without the native call the overlay just fills the window.
-    try {
-      await document.documentElement.requestFullscreen();
-    } catch {}
-  };
-
-  const closeFull = async () => {
-    setFull(false);
-    if (document.fullscreenElement) {
-      try {
-        await document.exitFullscreen();
-      } catch {}
-    }
-  };
-
-  // Esc leaves native fullscreen without telling React, so follow the document instead.
-  useEffect(() => {
-    const sync = () => !document.fullscreenElement && setFull(false);
-    document.addEventListener('fullscreenchange', sync);
-    return () => document.removeEventListener('fullscreenchange', sync);
-  }, []);
-
-  // Space is the one key people reach for once the controls are the only thing on screen.
+  // Deliberately not the Fullscreen API: this fills the page, it does not take over
+  // the browser chrome. Escape closes it here rather than the browser handling it.
   useEffect(() => {
     if (!full) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.code !== 'Space' || (e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const typing = (e.target as HTMLElement)?.tagName === 'INPUT';
+      if (e.key === 'Escape') return setFull(false);
+      if (e.code !== 'Space' || typing) return;
       e.preventDefault();
       setPlaying(!playing);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [full, playing, setPlaying]);
+
+  // The page behind must not scroll while the overlay covers it.
+  useEffect(() => {
+    if (!full) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => void (document.body.style.overflow = prevOverflow);
+  }, [full]);
 
   if (!track) return null;
 
@@ -145,6 +137,10 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
       {/* Stays mounted across the view switch — remounting it would restart the track. */}
       <audio
         ref={audioRef}
+        // Cloudflare's static assets ignore Range headers and answer with the whole file,
+        // so a seek past what is buffered refetches from byte 0 and playback restarts.
+        // preload="auto" buffers the track up front, keeping seeks inside the buffer.
+        preload="auto"
         onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
         onEnded={next}
@@ -154,6 +150,10 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
       {full && (
         <FullView
           track={track}
+          queue={queue}
+          index={index}
+          setIndex={setIndex}
+          loading={loading}
           time={time}
           dur={seekMax}
           onSeek={seek}
@@ -168,7 +168,7 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
           volume={volume}
           setVolume={setVolume}
           error={error}
-          onClose={closeFull}
+          onClose={() => setFull(false)}
         />
       )}
 
@@ -179,7 +179,7 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
       >
       <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
         <button
-          onClick={openFull}
+          onClick={() => setFull(true)}
           aria-label="Play fullscreen"
           title="Play fullscreen"
           className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-md"
@@ -272,9 +272,13 @@ function Btn({
   );
 }
 
-/** Apple-style now playing: the cover fills the screen, blurred behind itself. */
+/** Fills the page (not the browser) — the cover blurred behind itself, queue on the left. */
 function FullView({
   track,
+  queue,
+  index,
+  setIndex,
+  loading,
   time,
   dur,
   onSeek,
@@ -292,6 +296,10 @@ function FullView({
   onClose,
 }: {
   track: Track;
+  queue: Track[];
+  index: number;
+  setIndex: (i: number) => void;
+  loading: boolean;
   time: number;
   dur: number;
   onSeek: (t: number) => void;
@@ -309,10 +317,11 @@ function FullView({
   onClose: () => void;
 }) {
   const art = track.artworkLarge ?? track.artwork;
+  const [showQueue, setShowQueue] = useState(true);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-neutral-950 text-neutral-100">
-      {/* The cover doubles as its own backdrop — the ambient wash without needing a colour API. */}
+    <div className="fixed inset-0 z-50 overflow-hidden bg-neutral-950 text-neutral-100">
+      {/* The cover doubles as its own backdrop — the ambient wash with no colour API. */}
       {art && (
         <img
           src={art}
@@ -324,74 +333,127 @@ function FullView({
       <div className="pointer-events-none absolute inset-0 bg-neutral-950/60" />
 
       <button
+        onClick={() => setShowQueue(!showQueue)}
+        aria-label={showQueue ? 'Hide queue' : 'Show queue'}
+        aria-expanded={showQueue}
+        title={showQueue ? 'Hide queue' : 'Show queue'}
+        className="absolute left-5 top-5 z-30 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-sm backdrop-blur transition hover:bg-white/20"
+      >
+        {showQueue ? '⟨' : '☰'}
+      </button>
+
+      <button
         onClick={onClose}
-        aria-label="Exit fullscreen"
-        className="absolute right-5 top-5 z-10 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-lg backdrop-blur transition hover:bg-white/20"
+        aria-label="Close"
+        className="absolute right-5 top-5 z-20 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-lg backdrop-blur transition hover:bg-white/20"
       >
         ✕
       </button>
 
-      <div className="relative z-10 flex w-full max-w-lg flex-col items-center px-6">
-        {art ? (
-          <img
-            src={art}
-            alt={`${track.album || track.title} cover`}
-            className="aspect-square w-[min(52vh,80vw)] rounded-2xl object-cover shadow-2xl shadow-black/60"
-          />
-        ) : (
-          <div className="grid aspect-square w-[min(52vh,80vw)] place-items-center rounded-2xl bg-white/10 text-7xl">♪</div>
+      <div className="relative z-10 flex h-full">
+        {showQueue && (
+        <aside className="absolute inset-y-0 left-0 z-20 flex w-72 shrink-0 flex-col border-r border-white/10 bg-black/60 backdrop-blur-xl lg:relative lg:z-10 lg:bg-black/30">
+          <h3 className="px-5 pb-3 pt-20 text-xs font-semibold uppercase tracking-wider text-neutral-400">
+            Playing next · {queue.length}
+          </h3>
+          <ol className="min-h-0 flex-1 overflow-y-auto pb-6">
+            {queue.map((t, i) => {
+              const current = i === index;
+              return (
+                <li key={`${t.id}-${i}`}>
+                  <button
+                    onClick={() => setIndex(i)}
+                    aria-current={current}
+                    className={`flex w-full items-center gap-3 px-5 py-2 text-left transition hover:bg-white/10 ${
+                      current ? 'bg-white/15' : i < index ? 'opacity-40' : ''
+                    }`}
+                  >
+                    <span className="w-4 shrink-0 text-center text-[10px] tabular-nums text-neutral-400">
+                      {current ? (playing ? '▶' : '❚❚') : i + 1}
+                    </span>
+                    {t.artwork ? (
+                      <img src={t.artwork} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />
+                    ) : (
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded bg-white/10 text-xs">♪</span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className={`block truncate text-xs ${current ? 'font-semibold' : ''}`}>{t.title}</span>
+                      <span className="block truncate text-[11px] text-neutral-400">{t.artist}</span>
+                    </span>
+                    <span className="shrink-0 text-[10px] tabular-nums text-neutral-500">{fmtTime(t.duration)}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </aside>
         )}
 
-        <div className="mt-7 w-full text-center">
-          <h2 className="truncate text-2xl font-semibold">{track.title}</h2>
-          <p className="mt-1 truncate text-sm text-neutral-300">
-            {track.artist}
-            {isPreview(track) ? ' · 30s preview' : ''}
-          </p>
-          {track.album && <p className="mt-0.5 truncate text-xs text-neutral-400">{track.album}</p>}
-          {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
-        </div>
+        <div className="flex min-w-0 flex-1 flex-col items-center justify-center px-6">
+          <div className="flex w-full max-w-lg flex-col items-center">
+            {art ? (
+              <img
+                src={art}
+                alt={`${track.album || track.title} cover`}
+                className="aspect-square w-[min(46vh,78vw)] rounded-2xl object-cover shadow-2xl shadow-black/60"
+              />
+            ) : (
+              <div className="grid aspect-square w-[min(46vh,78vw)] place-items-center rounded-2xl bg-white/10 text-7xl">♪</div>
+            )}
 
-        <div className="mt-6 flex w-full items-center gap-3">
-          <span className="w-10 text-right text-xs tabular-nums text-neutral-400">{fmtTime(time)}</span>
-          <input
-            type="range"
-            min={0}
-            max={dur}
-            value={time}
-            step={0.1}
-            onChange={(e) => onSeek(Number(e.target.value))}
-            className="h-1 flex-1 accent-white"
-            aria-label="Seek"
-          />
-          <span className="w-10 text-xs tabular-nums text-neutral-400">{fmtTime(dur)}</span>
-        </div>
+            <div className="mt-6 w-full text-center">
+              <h2 className="truncate text-2xl font-semibold">{track.title}</h2>
+              <p className="mt-1 truncate text-sm text-neutral-300">
+                {track.artist}
+                {isPreview(track) ? ' · 30s preview' : ''}
+              </p>
+              {track.album && <p className="mt-0.5 truncate text-xs text-neutral-400">{track.album}</p>}
+              {loading && <p className="mt-2 text-xs text-neutral-400">Loading…</p>}
+              {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+            </div>
 
-        <div className="mt-6 flex items-center gap-5">
-          <Btn onClick={() => setShuffle(!shuffle)} active={shuffle} label="Shuffle">⇄</Btn>
-          <Btn onClick={prev} label="Previous">⏮</Btn>
-          <button
-            onClick={() => setPlaying(!playing)}
-            aria-label={playing ? 'Pause' : 'Play'}
-            className="grid h-16 w-16 place-items-center rounded-full bg-white text-xl text-black transition hover:scale-105"
-          >
-            {playing ? '❚❚' : '▶'}
-          </button>
-          <Btn onClick={next} label="Next">⏭</Btn>
-          <Btn onClick={() => setRepeat(!repeat)} active={repeat} label="Repeat">↻</Btn>
-        </div>
+            <div className="mt-5 flex w-full items-center gap-3">
+              <span className="w-10 text-right text-xs tabular-nums text-neutral-400">{fmtTime(time)}</span>
+              <input
+                type="range"
+                min={0}
+                max={dur}
+                value={time}
+                step={0.1}
+                onChange={(e) => onSeek(Number(e.target.value))}
+                className="h-1 flex-1 accent-white"
+                aria-label="Seek"
+              />
+              <span className="w-10 text-xs tabular-nums text-neutral-400">{fmtTime(dur)}</span>
+            </div>
 
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={volume}
-          onChange={(e) => setVolume(Number(e.target.value))}
-          className="mt-7 h-1 w-40 accent-white"
-          aria-label="Volume"
-        />
-        <p className="mt-5 text-[11px] text-neutral-500">Space to play or pause · Esc to exit</p>
+            <div className="mt-5 flex items-center gap-5">
+              <Btn onClick={() => setShuffle(!shuffle)} active={shuffle} label="Shuffle">⇄</Btn>
+              <Btn onClick={prev} label="Previous">⏮</Btn>
+              <button
+                onClick={() => setPlaying(!playing)}
+                aria-label={playing ? 'Pause' : 'Play'}
+                className="grid h-16 w-16 place-items-center rounded-full bg-white text-xl text-black transition hover:scale-105"
+              >
+                {playing ? '❚❚' : '▶'}
+              </button>
+              <Btn onClick={next} label="Next">⏭</Btn>
+              <Btn onClick={() => setRepeat(!repeat)} active={repeat} label="Repeat">↻</Btn>
+            </div>
+
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={volume}
+              onChange={(e) => setVolume(Number(e.target.value))}
+              className="mt-6 h-1 w-40 accent-white"
+              aria-label="Volume"
+            />
+            <p className="mt-4 text-[11px] text-neutral-500">Space to play or pause · Esc to close</p>
+          </div>
+        </div>
       </div>
     </div>
   );
