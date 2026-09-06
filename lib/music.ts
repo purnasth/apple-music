@@ -6,6 +6,8 @@ export type Track = {
   artist: string;
   album: string;
   artwork?: string;
+  /** Bigger cover for the fullscreen view; only fetched when it opens. */
+  artworkLarge?: string;
   appleUrl?: string;
   preview?: string;
   local?: boolean;
@@ -73,7 +75,8 @@ const toTrack = (r: DzTrack): Track => ({
   title: r.title,
   artist: r.artist.name,
   album: r.album?.title ?? '',
-  artwork: r.album?.cover_xl ?? r.album?.cover_big,
+  artwork: r.album?.cover_big ?? r.album?.cover_xl,
+  artworkLarge: r.album?.cover_xl ?? r.album?.cover_big,
   // Deezer has no Apple ids, so deep-link into Apple Music's own search instead.
   appleUrl: `https://music.apple.com/search?term=${encodeURIComponent(`${r.artist.name} ${r.title}`)}`,
   preview: r.preview,
