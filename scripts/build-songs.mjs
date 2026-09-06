@@ -53,7 +53,7 @@ for (const file of files) {
     if (pic) {
       const hash = createHash('sha1').update(pic.data).digest('hex').slice(0, 16);
       artwork = `/songs-art/${hash}.jpg`;
-      artworkLarge = `/songs-art/${hash}@lg.jpg`;
+      artworkLarge = `/songs-art/${hash}-lg.jpg`;
       // Album art repeats across a record, so hash-name it and convert each one once.
       if (!seen.has(hash)) {
         seen.add(hash);
@@ -61,7 +61,8 @@ for (const file of files) {
         await writeFile(raw, pic.data);
         // 200px covers the 40px list thumbnail and 64px player art even at 2x DPI;
         // the @lg copy is only fetched when the fullscreen view opens.
-        for (const [px, q, suffix] of [[200, 75, ''], [600, 80, '@lg']]) {
+        // '-lg' not '@lg': Cloudflare 307-redirects '@' to %40, costing a round trip per open.
+        for (const [px, q, suffix] of [[200, 75, ''], [600, 80, '-lg']]) {
           await run('sips', ['-Z', String(px), '-s', 'format', 'jpeg', '-s', 'formatOptions', String(q),
             raw, '--out', join(ART, `${hash}${suffix}.jpg`)]);
         }
@@ -89,6 +90,6 @@ for (const file of files) {
 tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 await writeFile('public/songs.json', JSON.stringify(tracks));
 
-const names = [...seen].flatMap((h) => [`${h}.jpg`, `${h}@lg.jpg`]);
+const names = [...seen].flatMap((h) => [`${h}.jpg`, `${h}-lg.jpg`]);
 const artBytes = (await Promise.all(names.map((n) => stat(join(ART, n))))).reduce((s, f) => s + f.size, 0);
 console.log(`${tracks.length} tracks, ${seen.size} covers at two sizes (${(artBytes / 1e6).toFixed(1)} MB)`);
