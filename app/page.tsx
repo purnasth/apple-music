@@ -7,6 +7,7 @@ import {
   Playlists,
   search,
   importFiles,
+  isPreview,
   getLibrary,
   removeTrack,
   getPlaylists,
@@ -26,6 +27,7 @@ export default function Home() {
 
   const [library, setLibrary] = useState<Track[]>([]);
   const [importing, setImporting] = useState<string | null>(null);
+  const [folder, setFolder] = useState<string | null>(null);
 
   const [playlists, setPlaylists] = useState<Playlists>({});
   const [active, setActive] = useState<string | null>(null);
@@ -91,7 +93,9 @@ export default function Home() {
     }
   }, []);
 
-  const shown = tab === 'search' ? results : tab === 'library' ? library : active ? playlists[active] ?? [] : [];
+  const folders = [...new Set(library.map((t) => t.folder).filter(Boolean as unknown as (f?: string) => f is string))].sort();
+  const inLibrary = folder ? library.filter((t) => t.folder === folder) : library;
+  const shown = tab === 'search' ? results : tab === 'library' ? inLibrary : active ? playlists[active] ?? [] : [];
 
   return (
     <div className="min-h-screen bg-neutral-950 pb-28 text-neutral-100">
@@ -131,6 +135,22 @@ export default function Home() {
       <main className="mx-auto max-w-6xl px-4 py-6">
         {tab === 'library' && (
           <DropZone onFiles={onFiles} importing={importing} />
+        )}
+
+        {tab === 'library' && folders.length > 1 && (
+          <div className="mb-4 flex flex-wrap gap-2">
+            {[null, ...folders].map((f) => (
+              <button
+                key={f ?? '__all'}
+                onClick={() => setFolder(f)}
+                className={`rounded-full px-3 py-1 text-xs transition ${
+                  folder === f ? 'bg-white text-neutral-900' : 'bg-white/10 text-neutral-400 hover:bg-white/20'
+                }`}
+              >
+                {f ?? 'All'} ({f ? library.filter((t) => t.folder === f).length : library.length})
+              </button>
+            ))}
+          </div>
         )}
 
         {tab === 'playlists' && (
@@ -182,7 +202,8 @@ export default function Home() {
                 if (name) updatePlaylists({ ...playlists, [name]: [track] });
               }}
               onRemove={
-                tab === 'library'
+                // Bundled tracks ship with the site; removeTrack can't evict one, it would just reappear.
+                tab === 'library' && !track.id.startsWith('file:')
                   ? async () => {
                       await removeTrack(track.id);
                       setLibrary(await getLibrary());
@@ -247,7 +268,7 @@ function Row({
 
       <span className="hidden text-xs tabular-nums text-neutral-500 sm:block">{fmtTime(track.duration)}</span>
 
-      {!track.local && (
+      {isPreview(track) && (
         <span className="hidden rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-neutral-400 md:block">
           preview
         </span>
@@ -296,6 +317,7 @@ function Row({
 
 function DropZone({ onFiles, importing }: { onFiles: (f: File[]) => void; importing: string | null }) {
   const input = useRef<HTMLInputElement>(null);
+  const folder = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
 
   return (
@@ -326,7 +348,36 @@ function DropZone({ onFiles, importing }: { onFiles: (f: File[]) => void; import
           e.target.value = '';
         }}
       />
-      {importing ? `Importing ${importing}…` : 'Drop audio files here, or click to choose — stored in your browser.'}
+      <input
+        ref={folder}
+        type="file"
+        multiple
+        hidden
+        // webkitdirectory is missing from React's typings; it picks a folder and recurses
+        // into every subfolder, which a plain `multiple` input cannot do.
+        {...({ webkitdirectory: '' } as Record<string, string>)}
+        onChange={(e) => {
+          onFiles(Array.from(e.target.files ?? []));
+          e.target.value = '';
+        }}
+      />
+      {importing ? (
+        `Importing ${importing}…`
+      ) : (
+        <>
+          Drop audio files here, or click to choose — stored in your browser.
+          <br />
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              folder.current?.click();
+            }}
+            className="mt-2 underline underline-offset-4 hover:text-neutral-300"
+          >
+            or import a whole folder
+          </button>
+        </>
+      )}
     </div>
   );
 }

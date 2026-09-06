@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { search, fmtTime } from './music.ts';
+import { search, fmtTime, folderOf } from './music.ts';
 
 test('fmtTime formats and survives junk', () => {
   assert.equal(fmtTime(0), '--:--');
@@ -8,6 +8,15 @@ test('fmtTime formats and survives junk', () => {
   assert.equal(fmtTime(605), '10:05');
   assert.equal(fmtTime(undefined), '--:--');
   assert.equal(fmtTime(Infinity), '--:--');
+});
+
+test('folderOf picks the immediate parent of a folder-picked file', () => {
+  assert.equal(folderOf('songs highquality/new/Baaton.m4a'), 'new');
+  assert.equal(folderOf('songs highquality/OG/Darkhaast.m4a'), 'OG');
+  assert.equal(folderOf('flat/a.m4a'), 'flat');
+  // A plain (non-folder) file pick leaves webkitRelativePath empty.
+  assert.equal(folderOf(''), undefined);
+  assert.equal(folderOf('a.m4a'), undefined);
 });
 
 test('search maps Deezer results into playable tracks', async () => {

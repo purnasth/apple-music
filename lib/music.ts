@@ -10,6 +10,8 @@ export type Track = {
   preview?: string;
   local?: boolean;
   duration?: number;
+  /** Immediate parent folder when imported via the folder picker (new, OG, temp…). */
+  folder?: string;
 };
 
 /* ---------- Deezer search (public API, no key) ----------
@@ -99,6 +101,9 @@ const meta = () => (_meta ??= createStore('music-lib', 'meta'));
 
 type MetaRecord = Omit<Track, 'artwork'> & { cover?: Blob };
 
+/** webkitRelativePath is "<picked>/<sub>/<file>" for a folder pick and "" for a plain one. */
+export const folderOf = (path: string) => path.split('/').at(-2) || undefined;
+
 export async function importFiles(
   files: File[],
   onProgress?: (done: number, total: number) => void
@@ -109,6 +114,7 @@ export async function importFiles(
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const id = `local:${crypto.randomUUID()}`;
+    const folder = folderOf(file.webkitRelativePath);
     let title = file.name.replace(/\.[^.]+$/, '');
     let artist = 'Unknown artist';
     let album = '';
@@ -128,7 +134,7 @@ export async function importFiles(
       // Unreadable tags are not fatal — filename metadata still plays fine.
     }
 
-    const record: MetaRecord = { id, title, artist, album, duration, cover, local: true };
+    const record: MetaRecord = { id, title, artist, album, duration, cover, folder, local: true };
     await set(id, file, blobs());
     await set(id, record, meta());
     added.push(localTrack(record));
@@ -142,9 +148,23 @@ const localTrack = (r: MetaRecord): Track => ({
   artwork: r.cover ? URL.createObjectURL(r.cover) : undefined,
 });
 
+/** 30s clips come from the catalogue; bundled and imported files are whole tracks. */
+export const isPreview = (t: Track) => !t.local && !t.id.startsWith('file:');
+
+/** The library shipped with the site (public/songs.json), audio hosted on R2. */
+async function bundled(): Promise<Track[]> {
+  try {
+    const res = await fetch('/songs.json');
+    return res.ok ? ((await res.json()) as Track[]) : [];
+  } catch {
+    return []; // No manifest is a normal state, not an error.
+  }
+}
+
 export async function getLibrary(): Promise<Track[]> {
   const records = (await values(meta())) as MetaRecord[];
-  return records.map(localTrack).sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
+  const all = [...(await bundled()), ...records.map(localTrack)];
+  return all.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 }
 
 export async function removeTrack(id: string) {
