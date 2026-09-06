@@ -12,40 +12,81 @@ export type Track = {
   duration?: number;
 };
 
-/* ---------- iTunes search (public API, CORS-open, no key) ---------- */
+/* ---------- Deezer search (public API, no key) ----------
+   The iTunes Search API only indexes the iTunes *Store* purchase catalog, so
+   streaming-only releases are simply absent — e.g. The 1975's "Being Funny in a
+   Foreign Language" returns nothing there. Deezer indexes the streaming catalog
+   and still hands back a 30s preview and cover art. */
 
-type ITunesResult = {
-  trackId: number;
-  trackName: string;
-  artistName: string;
-  collectionName?: string;
-  artworkUrl100?: string;
-  trackViewUrl?: string;
-  previewUrl?: string;
-  trackTimeMillis?: number;
+type DzTrack = {
+  id: number;
+  title: string;
+  duration?: number;
+  preview?: string;
+  artist: { name: string };
+  album?: { title?: string; cover_xl?: string; cover_big?: string };
 };
 
-const hiRes = (url?: string) => url?.replace('100x100bb', '600x600bb');
+let jsonpSeq = 0;
+
+/** Deezer sends no CORS headers but does support JSONP, which keeps this app a static export. */
+function jsonp<T>(path: string, params: Record<string, string>, signal?: AbortSignal): Promise<T> {
+  const qs = new URLSearchParams(params);
+  // Node/SSR (tests) has no DOM to inject a script into — but also no CORS to dodge.
+  if (typeof document === 'undefined') {
+    return fetch(`https://api.deezer.com/${path}?${qs}`, { signal }).then((r) => r.json() as Promise<T>);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const cb = `__dz${jsonpSeq++}`;
+    const script = document.createElement('script');
+    const w = window as unknown as Record<string, unknown>;
+    const done = () => {
+      delete w[cb];
+      script.remove();
+      signal?.removeEventListener('abort', abort);
+    };
+    const abort = () => {
+      done();
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    if (signal?.aborted) return abort();
+    signal?.addEventListener('abort', abort);
+    w[cb] = (data: T) => {
+      done();
+      resolve(data);
+    };
+    script.onerror = () => {
+      done();
+      reject(new Error('Deezer search failed'));
+    };
+    qs.set('output', 'jsonp');
+    qs.set('callback', cb);
+    script.src = `https://api.deezer.com/${path}?${qs}`;
+    document.head.append(script);
+  });
+}
+
+const toTrack = (r: DzTrack): Track => ({
+  id: `deezer:${r.id}`,
+  title: r.title,
+  artist: r.artist.name,
+  album: r.album?.title ?? '',
+  artwork: r.album?.cover_xl ?? r.album?.cover_big,
+  // Deezer has no Apple ids, so deep-link into Apple Music's own search instead.
+  appleUrl: `https://music.apple.com/search?term=${encodeURIComponent(`${r.artist.name} ${r.title}`)}`,
+  preview: r.preview,
+  duration: r.duration,
+});
 
 export async function search(term: string, signal?: AbortSignal): Promise<Track[]> {
   if (!term.trim()) return [];
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=50`;
-  const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(`iTunes search failed (${res.status})`);
-  // Apple serves this as text/javascript, so res.json() is unreliable across browsers.
-  const data = JSON.parse(await res.text()) as { results: ITunesResult[] };
-  return data.results
-    .filter((r) => r.previewUrl)
-    .map((r) => ({
-      id: `itunes:${r.trackId}`,
-      title: r.trackName,
-      artist: r.artistName,
-      album: r.collectionName ?? '',
-      artwork: hiRes(r.artworkUrl100),
-      appleUrl: r.trackViewUrl,
-      preview: r.previewUrl,
-      duration: r.trackTimeMillis ? r.trackTimeMillis / 1000 : undefined,
-    }));
+  const data = await jsonp<{ data?: DzTrack[]; error?: { message?: string } }>(
+    'search',
+    { q: term, limit: '100' },
+    signal
+  );
+  if (data.error) throw new Error(data.error.message ?? 'Deezer search failed');
+  return (data.data ?? []).filter((r) => r.preview).map(toTrack);
 }
 
 /* ---------- Local library: audio blobs in IndexedDB ---------- */
@@ -90,20 +131,20 @@ export async function importFiles(
     const record: MetaRecord = { id, title, artist, album, duration, cover, local: true };
     await set(id, file, blobs());
     await set(id, record, meta());
-    added.push(toTrack(record));
+    added.push(localTrack(record));
     onProgress?.(i + 1, files.length);
   }
   return added;
 }
 
-const toTrack = (r: MetaRecord): Track => ({
+const localTrack = (r: MetaRecord): Track => ({
   ...r,
   artwork: r.cover ? URL.createObjectURL(r.cover) : undefined,
 });
 
 export async function getLibrary(): Promise<Track[]> {
   const records = (await values(meta())) as MetaRecord[];
-  return records.map(toTrack).sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
+  return records.map(localTrack).sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 }
 
 export async function removeTrack(id: string) {
@@ -111,11 +152,23 @@ export async function removeTrack(id: string) {
   await del(id, meta());
 }
 
+/** Deezer signs preview URLs with a ~15 minute expiry, so a saved playlist goes mute. */
+const expired = (url?: string) => {
+  const exp = url?.match(/exp=(\d+)/)?.[1];
+  return !exp || Number(exp) * 1000 < Date.now() + 5_000;
+};
+
 /** Resolve a playable URL. Local tracks stream from IndexedDB via an object URL. */
-export async function audioSrc(track: Track): Promise<string | undefined> {
-  if (!track.local) return track.preview;
-  const file = await get<File>(track.id, blobs());
-  return file ? URL.createObjectURL(file) : undefined;
+export async function audioSrc(track: Track, signal?: AbortSignal): Promise<string | undefined> {
+  if (track.local) {
+    const file = await get<File>(track.id, blobs());
+    return file ? URL.createObjectURL(file) : undefined;
+  }
+  if (!expired(track.preview)) return track.preview;
+  const id = track.id.startsWith('deezer:') ? track.id.slice(7) : undefined;
+  if (!id) return track.preview;
+  const fresh = await jsonp<DzTrack>(`track/${id}`, {}, signal);
+  return fresh.preview ?? track.preview;
 }
 
 /* ---------- Playlists: localStorage, no server ---------- */
