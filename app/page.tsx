@@ -14,6 +14,7 @@ import {
   savePlaylists,
   fmtTime,
   shuffled,
+  artistsOf,
 } from '@/lib/music';
 
 type Tab = 'search' | 'library' | 'playlists';
@@ -112,15 +113,37 @@ export default function Home() {
 
   const folders = [...new Set(library.map((t) => t.folder).filter(Boolean as unknown as (f?: string) => f is string))].sort();
 
-  // Artists of the tracks in the chosen folder, so the list narrows as you filter.
-  const artists = [...new Set(library.filter((t) => !folder || t.folder === folder).map((t) => t.artist))].sort((a, b) =>
-    a.localeCompare(b)
-  );
+  const inFolder = library.filter((t) => !folder || t.folder === folder);
+
+  // Every credited person, not every credit string, folded case-insensitively so
+  // "LANY" and "Lany" are one artist. The spelling shown is the one used most often.
+  const artists = (() => {
+    const byKey = new Map<string, Map<string, number>>();
+    for (const t of inFolder) {
+      for (const name of artistsOf(t.artist)) {
+        const variants = byKey.get(name.toLowerCase()) ?? new Map<string, number>();
+        variants.set(name, (variants.get(name) ?? 0) + 1);
+        byKey.set(name.toLowerCase(), variants);
+      }
+    }
+    return [...byKey.values()]
+      .map((variants) => {
+        // Most common spelling wins; on a tie prefer the one with more capitals, so a
+        // stylised name (LANY, MGMT) beats a lowercased stray rather than losing a coin flip.
+        const caps = (v: string) => (v.match(/[A-Z]/g) ?? []).length;
+        const ranked = [...variants.entries()].sort(
+          (a, b) => b[1] - a[1] || caps(b[0]) - caps(a[0]) || a[0].localeCompare(b[0])
+        );
+        return { name: ranked[0][0], count: ranked.reduce((n, [, c]) => n + c, 0) };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  })();
 
   const needle = filter.trim().toLowerCase();
-  const inLibrary = library
-    .filter((t) => !folder || t.folder === folder)
-    .filter((t) => !artist || t.artist === artist)
+  const artistNeedle = artist.trim().toLowerCase();
+  const inLibrary = inFolder
+    // Substring, so a half-typed name still narrows rather than matching nothing.
+    .filter((t) => !artistNeedle || artistsOf(t.artist).some((a) => a.toLowerCase().includes(artistNeedle)))
     .filter((t) => !needle || `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(needle))
     .sort(SORTS[sort]);
 
@@ -193,19 +216,23 @@ export default function Home() {
                 className="min-w-40 flex-1 rounded-full bg-white/10 px-4 py-1.5 text-xs outline-none placeholder:text-neutral-500 focus:bg-white/15"
               />
 
-              <select
+              {/* A datalist gives type-to-search over 85 artists for free; a <select> that
+                  long can only be scrolled. Typing a partial name still filters. */}
+              <input
+                list="artist-options"
                 value={artist}
                 onChange={(e) => setArtist(e.target.value)}
+                placeholder={`All artists (${artists.length})`}
                 aria-label="Artist"
-                className="rounded-full bg-white/10 px-3 py-1.5 text-xs outline-none focus:bg-white/15"
-              >
-                <option value="">All artists ({artists.length})</option>
+                className="w-44 rounded-full bg-white/10 px-4 py-1.5 text-xs outline-none placeholder:text-neutral-500 focus:bg-white/15"
+              />
+              <datalist id="artist-options">
                 {artists.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
+                  <option key={a.name} value={a.name}>
+                    {a.count} {a.count === 1 ? 'track' : 'tracks'}
                   </option>
                 ))}
-              </select>
+              </datalist>
 
               <select
                 value={sort}

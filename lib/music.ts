@@ -231,6 +231,18 @@ export function savePlaylists(p: Playlists) {
 }
 
 /**
+ * Tags credit a collaboration as one string — "Pritam, Arijit Singh & Amitabh Bhattacharya"
+ * is three people, and grouping by the raw string buries Arijit Singh across a dozen
+ * near-duplicate entries. Split on comma and ampersand only: "Sachin-Jigar" and
+ * "Dan + Shay" are single acts, so hyphen and plus must be left alone.
+ */
+export const artistsOf = (credit: string) =>
+  credit
+    .split(/\s*[,&]\s*/)
+    .map((a) => a.trim())
+    .filter(Boolean);
+
+/**
  * Fisher-Yates. Repeatedly picking a random index — the obvious approach — can play the
  * same track twice before others play at all; a permutation plays each exactly once.
  */

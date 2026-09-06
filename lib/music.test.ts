@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { search, fmtTime, folderOf, shuffled } from './music.ts';
+import { search, fmtTime, folderOf, shuffled, artistsOf } from './music.ts';
 
 test('fmtTime formats and survives junk', () => {
   assert.equal(fmtTime(0), '--:--');
@@ -8,6 +8,20 @@ test('fmtTime formats and survives junk', () => {
   assert.equal(fmtTime(605), '10:05');
   assert.equal(fmtTime(undefined), '--:--');
   assert.equal(fmtTime(Infinity), '--:--');
+});
+
+test('artistsOf splits collaborations but not hyphenated or plus-joined acts', () => {
+  assert.deepEqual(artistsOf('Pritam, Arijit Singh & Amitabh Bhattacharya'), [
+    'Pritam',
+    'Arijit Singh',
+    'Amitabh Bhattacharya',
+  ]);
+  assert.deepEqual(artistsOf('Abdul Hannan & Kaavish'), ['Abdul Hannan', 'Kaavish']);
+  assert.deepEqual(artistsOf('Arijit Singh'), ['Arijit Singh']);
+  // Single acts whose names contain a separator-looking character.
+  assert.deepEqual(artistsOf('Sachin-Jigar'), ['Sachin-Jigar']);
+  assert.deepEqual(artistsOf('Dan + Shay & Justin Bieber'), ['Dan + Shay', 'Justin Bieber']);
+  assert.deepEqual(artistsOf(''), []);
 });
 
 test('shuffled is a permutation, never a resample', () => {
