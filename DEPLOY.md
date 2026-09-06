@@ -15,9 +15,9 @@ it is the only place the songs exist.
 
 ## Adding songs
 
-1. Drop the files into `~/Downloads/songs highquality/<folder>/`. The folder name
-   becomes a filter chip in the Library tab, so `all-time`, `current` and `new`
-   already work; a new folder appears on its own.
+1. Drop the files into `public/songs/<folder>/`. The folder name becomes a filter
+   chip in the Library tab, so `all-time`, `current` and `new` already work; a new
+   folder appears on its own.
 2. `npm run deploy`
 
 Tags are read from the files themselves, so nothing needs renaming. Only changed
@@ -42,9 +42,9 @@ clone on every build. That is the trade — automatic merges, or a small repo.
 
 | | |
 |---|---|
-| audio | `~/Downloads/songs highquality`, symlinked to `public/songs` (gitignored) |
+| audio | `public/songs/<folder>/` — drop files here, gitignored |
 | covers | `public/songs-art`, generated, gitignored |
 | manifest | `public/songs.json`, generated, gitignored |
-| in git | the two scripts, ~44 KB |
+| in git | `scripts/build-songs.mjs`, ~4 KB |
 
 `build-songs.mjs` uses `sips` for the cover resize, so publishing works on macOS only.

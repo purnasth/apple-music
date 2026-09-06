@@ -40,8 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# generated from the song library by `npm run songs`; audio and covers live in R2.
-# songs.json is committed once it points at the bucket rather than the local symlink.
-/public/songs
+# the song library: audio you drop in, plus the covers and manifest generated from it.
+# Deployed as static assets straight from the build, never committed (840 MB).
+/public/songs/
 /public/songs-art/
 /public/songs.json
