@@ -1,0 +1,16 @@
+// next.config.ts sets `output: "export"`, so `next build` emits a plain static
+// site to ./out and there is no server to run. Without this file `wrangler deploy`
+// auto-detects "Next.js", assumes SSR, and runs the OpenNext migration — which then
+// dies on a missing .next/standalone that a static export never produces.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "apple-music",
+  "compatibility_date": "2026-09-06",
+  // No "main": static assets only, no Worker script.
+  "assets": {
+    "directory": "./out",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash"
+  },
+  "observability": { "enabled": true }
+}
