@@ -7,6 +7,8 @@
 
 html {
   color-scheme: dark;
+  /* Stop Safari inflating text on rotation. */
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -16,4 +18,14 @@ body {
 /* Keep the seek/volume thumbs visible on the dark player bar. */
 input[type="range"] {
   cursor: pointer;
+}
+
+/* iOS Safari zooms the page in — and never zooms back out — when a focused form
+   control's text is under 16px. Every control here is text-sm/text-xs. */
+@media (max-width: 640px) {
+  input:not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }

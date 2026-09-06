@@ -1,6 +1,20 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  TbArrowsShuffle,
+  TbChevronDown,
+  TbExternalLink,
+  TbFolderPlus,
+  TbMusic,
+  TbPlayerPauseFilled,
+  TbPlayerPlayFilled,
+  TbPlus,
+  TbSearch,
+  TbTrash,
+  TbUpload,
+  TbX,
+} from 'react-icons/tb';
 import Player from '@/components/Player';
 import {
   Track,
@@ -174,18 +188,25 @@ export default function Home() {
       <header className="sticky top-0 z-30 border-b border-white/10 bg-neutral-950/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-4">
           <div className="flex items-center gap-3">
-            <h1 className="text-lg font-semibold tracking-tight">
-              <span className="text-red-500">♫</span> Music
+            <h1 className="flex items-center gap-1.5 text-lg font-semibold tracking-tight">
+              <TbMusic className="text-red-500" size={20} />
+              Music
             </h1>
-            <input
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setTab('search');
-              }}
-              placeholder="Search songs, artists, albums…"
-              className="flex-1 rounded-full bg-white/10 px-4 py-2 text-sm outline-none placeholder:text-neutral-500 focus:bg-white/15"
-            />
+            <div className="relative flex-1">
+              <TbSearch
+                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500"
+                size={16}
+              />
+              <input
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setTab('search');
+                }}
+                placeholder="Search songs, artists, albums…"
+                className="w-full rounded-full bg-white/10 py-2 pl-10 pr-4 text-sm outline-none placeholder:text-neutral-500 focus:bg-white/15"
+              />
+            </div>
           </div>
           <nav className="flex gap-1 text-sm">
             {(['search', 'library', 'playlists'] as Tab[]).map((t) => (
@@ -228,40 +249,52 @@ export default function Home() {
             )}
 
             <div className="flex flex-wrap items-center gap-2">
-              <input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter title, artist, album…"
-                aria-label="Filter library"
-                className="min-w-40 flex-1 rounded-full bg-white/10 px-4 py-1.5 text-xs outline-none placeholder:text-neutral-500 focus:bg-white/15"
-              />
+              <div className="relative w-full sm:min-w-40 sm:flex-1">
+                <TbSearch
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500"
+                  size={14}
+                />
+                <input
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filter title, artist, album…"
+                  aria-label="Filter library"
+                  className="w-full rounded-full bg-white/10 py-1.5 pl-9 pr-4 text-xs outline-none placeholder:text-neutral-500 focus:bg-white/15"
+                />
+              </div>
 
               {/* Hand-rolled rather than a <select> or <datalist>: 95 artists render as an
                   unbounded native list with no way to cap its height or search it. */}
-              <div ref={artistBox} className="relative">
+              <div ref={artistBox} className="relative w-full sm:w-auto">
                 <button
                   onClick={() => setArtistOpen(!artistOpen)}
                   aria-expanded={artistOpen}
                   aria-haspopup="listbox"
-                  className={`flex w-44 items-center justify-between gap-2 rounded-full px-4 py-1.5 text-xs transition ${
+                  className={`flex w-full items-center justify-between gap-2 rounded-full px-4 py-1.5 text-xs transition sm:w-44 ${
                     artist ? 'bg-white text-neutral-900' : 'bg-white/10 text-neutral-300 hover:bg-white/20'
                   }`}
                 >
                   <span className="truncate">{artist || `All artists (${artists.length})`}</span>
-                  <span className="shrink-0 opacity-60">▾</span>
+                  <TbChevronDown className={`shrink-0 opacity-60 transition ${artistOpen ? 'rotate-180' : ''}`} />
                 </button>
 
                 {artistOpen && (
-                  <div className="absolute left-0 z-40 mt-1 w-64 overflow-hidden rounded-xl border border-white/10 bg-neutral-900 shadow-2xl shadow-black/50">
-                    <input
-                      autoFocus
-                      value={artistQuery}
-                      onChange={(e) => setArtistQuery(e.target.value)}
-                      placeholder="Search artists…"
-                      aria-label="Search artists"
-                      className="w-full border-b border-white/10 bg-transparent px-4 py-2.5 text-xs outline-none placeholder:text-neutral-500"
-                    />
-                    <ul role="listbox" className="max-h-72 overflow-y-auto py-1">
+                  <div className="absolute left-0 z-40 mt-1 w-full overflow-hidden sm:w-64 rounded-xl border border-white/10 bg-neutral-900 shadow-2xl shadow-black/50">
+                    <div className="relative border-b border-white/10">
+                      <TbSearch
+                        className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500"
+                        size={14}
+                      />
+                      <input
+                        autoFocus
+                        value={artistQuery}
+                        onChange={(e) => setArtistQuery(e.target.value)}
+                        placeholder="Search artists…"
+                        aria-label="Search artists"
+                        className="w-full bg-transparent py-2.5 pl-10 pr-4 text-xs outline-none placeholder:text-neutral-500"
+                      />
+                    </div>
+                    <ul role="listbox" className="max-h-[50vh] overflow-y-auto py-1 sm:max-h-72">
                       <li>
                         <button
                           onClick={() => {
@@ -320,17 +353,19 @@ export default function Home() {
               <button
                 onClick={() => inLibrary.length && play(inLibrary, 0)}
                 disabled={!inLibrary.length}
-                className="rounded-full bg-white px-4 py-1.5 text-xs font-medium text-neutral-900 transition hover:bg-neutral-200 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-medium text-neutral-900 transition hover:bg-neutral-200 disabled:opacity-40"
               >
-                ▶ Play
+                <TbPlayerPlayFilled size={12} />
+                Play
               </button>
               <button
                 onClick={() => inLibrary.length && play(shuffled(inLibrary), 0)}
                 disabled={!inLibrary.length}
                 title="Play these in a random order"
-                className="rounded-full bg-white/10 px-4 py-1.5 text-xs transition hover:bg-white/20 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-1.5 text-xs transition hover:bg-white/20 disabled:opacity-40"
               >
-                ⇄ Shuffle
+                <TbArrowsShuffle size={14} />
+                Shuffle
               </button>
             </div>
 
@@ -452,10 +487,12 @@ function Row({
         {track.artwork ? (
           <img src={track.artwork} alt="" className="h-11 w-11 rounded object-cover" />
         ) : (
-          <div className="grid h-11 w-11 place-items-center rounded bg-white/10 text-neutral-400">♪</div>
+          <div className="grid h-11 w-11 place-items-center rounded bg-white/10 text-neutral-400">
+            <TbMusic size={20} />
+          </div>
         )}
         <span className="absolute inset-0 grid place-items-center rounded bg-black/50 text-white opacity-0 transition group-hover:opacity-100">
-          {playing ? '❚❚' : '▶'}
+          {playing ? <TbPlayerPauseFilled size={16} /> : <TbPlayerPlayFilled size={16} />}
         </span>
       </button>
 
@@ -475,25 +512,28 @@ function Row({
         </span>
       )}
 
-      <select
-        value=""
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === '__new') onNewPlaylist();
-          else if (v) onAdd(v);
-          e.target.value = '';
-        }}
-        aria-label="Add to playlist"
-        className="w-8 cursor-pointer appearance-none rounded bg-transparent text-center text-neutral-500 hover:text-white focus:outline-none"
-      >
-        <option value="">＋</option>
-        {playlistNames.map((n) => (
-          <option key={n} value={n}>
-            {n}
-          </option>
-        ))}
-        <option value="__new">New playlist…</option>
-      </select>
+      <span className="relative grid h-8 w-8 shrink-0 place-items-center text-neutral-500 transition hover:text-white">
+        <TbPlus size={18} />
+        <select
+          value=""
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === '__new') onNewPlaylist();
+            else if (v) onAdd(v);
+            e.target.value = '';
+          }}
+          aria-label="Add to playlist"
+          className="absolute inset-0 cursor-pointer appearance-none rounded bg-transparent text-transparent opacity-0"
+        >
+          <option value="">Add to playlist…</option>
+          {playlistNames.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+          <option value="__new">New playlist…</option>
+        </select>
+      </span>
 
       {track.appleUrl && (
         <a
@@ -501,15 +541,20 @@ function Row({
           target="_blank"
           rel="noopener noreferrer"
           title="Open in Apple Music (full track)"
-          className="hidden w-8 text-center text-neutral-500 hover:text-red-500 sm:block"
+          className="hidden h-8 w-8 shrink-0 place-items-center text-neutral-500 hover:text-red-500 sm:grid"
         >
-          ↗
+          <TbExternalLink size={16} />
         </a>
       )}
 
       {onRemove && (
-        <button onClick={onRemove} title="Remove" className="w-8 text-neutral-600 hover:text-red-500">
-          ✕
+        <button
+          onClick={onRemove}
+          title="Remove"
+          aria-label="Remove"
+          className="grid h-8 w-8 shrink-0 place-items-center text-neutral-600 hover:text-red-500"
+        >
+          <TbX size={16} />
         </button>
       )}
     </li>
@@ -566,6 +611,7 @@ function DropZone({ onFiles, importing }: { onFiles: (f: File[]) => void; import
         `Importing ${importing}…`
       ) : (
         <>
+          <TbUpload className="mx-auto mb-2 text-neutral-600" size={24} />
           Drop audio files here, or click to choose — stored in your browser.
           <br />
           <button
@@ -573,8 +619,9 @@ function DropZone({ onFiles, importing }: { onFiles: (f: File[]) => void; import
               e.stopPropagation();
               folder.current?.click();
             }}
-            className="mt-2 underline underline-offset-4 hover:text-neutral-300"
+            className="mt-2 inline-flex items-center gap-1.5 underline underline-offset-4 hover:text-neutral-300"
           >
+            <TbFolderPlus size={16} />
             or import a whole folder
           </button>
         </>
@@ -619,7 +666,10 @@ function PlaylistBar({
           placeholder="New playlist name"
           className="flex-1 rounded-full bg-white/10 px-4 py-2 text-sm outline-none placeholder:text-neutral-500"
         />
-        <button className="rounded-full bg-white px-4 py-2 text-sm font-medium text-black">Create</button>
+        <button className="flex shrink-0 items-center gap-1.5 rounded-full bg-white px-4 py-2 text-sm font-medium text-black">
+          <TbPlus size={16} />
+          Create
+        </button>
       </form>
 
       <div className="flex flex-wrap gap-2">
@@ -634,7 +684,7 @@ function PlaylistBar({
               {n} ({playlists[n].length})
             </button>
             <button onClick={() => onDelete(n)} aria-label={`Delete ${n}`} className="opacity-60 hover:opacity-100">
-              ✕
+              <TbTrash size={14} />
             </button>
           </span>
         ))}
