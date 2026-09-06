@@ -13,9 +13,21 @@ import {
   getPlaylists,
   savePlaylists,
   fmtTime,
+  shuffled,
+  artistsOf,
 } from '@/lib/music';
 
 type Tab = 'search' | 'library' | 'playlists';
+
+type SortKey = 'artist' | 'title' | 'album' | 'longest' | 'shortest';
+
+const SORTS: Record<SortKey, (a: Track, b: Track) => number> = {
+  artist: (a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title),
+  title: (a, b) => a.title.localeCompare(b.title),
+  album: (a, b) => (a.album || '~').localeCompare(b.album || '~') || a.title.localeCompare(b.title),
+  longest: (a, b) => (b.duration ?? 0) - (a.duration ?? 0),
+  shortest: (a, b) => (a.duration ?? 0) - (b.duration ?? 0),
+};
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>('search');
@@ -28,6 +40,12 @@ export default function Home() {
   const [library, setLibrary] = useState<Track[]>([]);
   const [importing, setImporting] = useState<string | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
+  const [artist, setArtist] = useState<string>('');
+  const [artistOpen, setArtistOpen] = useState(false);
+  const [artistQuery, setArtistQuery] = useState('');
+  const artistBox = useRef<HTMLDivElement>(null);
+  const [filter, setFilter] = useState('');
+  const [sort, setSort] = useState<SortKey>('artist');
 
   const [playlists, setPlaylists] = useState<Playlists>({});
   const [active, setActive] = useState<string | null>(null);
@@ -71,6 +89,24 @@ export default function Home() {
     setPlaying(true);
   };
 
+  // A folder change can strand an artist selection that folder has no tracks for.
+  useEffect(() => setArtist(''), [folder]);
+
+  // Dismiss the artist popup on an outside click or Escape, the way a menu should behave.
+  useEffect(() => {
+    if (!artistOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!artistBox.current?.contains(e.target as Node)) setArtistOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setArtistOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [artistOpen]);
+
   const updatePlaylists = (next: Playlists) => {
     setPlaylists(next);
     savePlaylists(next);
@@ -94,7 +130,43 @@ export default function Home() {
   }, []);
 
   const folders = [...new Set(library.map((t) => t.folder).filter(Boolean as unknown as (f?: string) => f is string))].sort();
-  const inLibrary = folder ? library.filter((t) => t.folder === folder) : library;
+
+  const inFolder = library.filter((t) => !folder || t.folder === folder);
+
+  // Every credited person, not every credit string, folded case-insensitively so
+  // "LANY" and "Lany" are one artist. The spelling shown is the one used most often.
+  const artists = (() => {
+    const byKey = new Map<string, Map<string, number>>();
+    for (const t of inFolder) {
+      for (const name of artistsOf(t.artist)) {
+        const variants = byKey.get(name.toLowerCase()) ?? new Map<string, number>();
+        variants.set(name, (variants.get(name) ?? 0) + 1);
+        byKey.set(name.toLowerCase(), variants);
+      }
+    }
+    return [...byKey.values()]
+      .map((variants) => {
+        // Most common spelling wins; on a tie prefer the one with more capitals, so a
+        // stylised name (LANY, MGMT) beats a lowercased stray rather than losing a coin flip.
+        const caps = (v: string) => (v.match(/[A-Z]/g) ?? []).length;
+        const ranked = [...variants.entries()].sort(
+          (a, b) => b[1] - a[1] || caps(b[0]) - caps(a[0]) || a[0].localeCompare(b[0])
+        );
+        return { name: ranked[0][0], count: ranked.reduce((n, [, c]) => n + c, 0) };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  })();
+
+  const aq = artistQuery.trim().toLowerCase();
+  const artistMatches = aq ? artists.filter((a) => a.name.toLowerCase().includes(aq)) : artists;
+
+  const needle = filter.trim().toLowerCase();
+  const artistNeedle = artist.trim().toLowerCase();
+  const inLibrary = inFolder
+    .filter((t) => !artistNeedle || artistsOf(t.artist).some((a) => a.toLowerCase() === artistNeedle))
+    .filter((t) => !needle || `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(needle))
+    .sort(SORTS[sort]);
+
   const shown = tab === 'search' ? results : tab === 'library' ? inLibrary : active ? playlists[active] ?? [] : [];
 
   return (
@@ -137,19 +209,148 @@ export default function Home() {
           <DropZone onFiles={onFiles} importing={importing} />
         )}
 
-        {tab === 'library' && folders.length > 1 && (
-          <div className="mb-4 flex flex-wrap gap-2">
-            {[null, ...folders].map((f) => (
-              <button
-                key={f ?? '__all'}
-                onClick={() => setFolder(f)}
-                className={`rounded-full px-3 py-1 text-xs transition ${
-                  folder === f ? 'bg-white text-neutral-900' : 'bg-white/10 text-neutral-400 hover:bg-white/20'
-                }`}
+        {tab === 'library' && !!library.length && (
+          <div className="mb-4 space-y-3">
+            {folders.length > 1 && (
+              <div className="flex flex-wrap gap-2">
+                {[null, ...folders].map((f) => (
+                  <button
+                    key={f ?? '__all'}
+                    onClick={() => setFolder(f)}
+                    className={`rounded-full px-3 py-1 text-xs transition ${
+                      folder === f ? 'bg-white text-neutral-900' : 'bg-white/10 text-neutral-400 hover:bg-white/20'
+                    }`}
+                  >
+                    {f ?? 'All'} ({f ? library.filter((t) => t.folder === f).length : library.length})
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter title, artist, album…"
+                aria-label="Filter library"
+                className="min-w-40 flex-1 rounded-full bg-white/10 px-4 py-1.5 text-xs outline-none placeholder:text-neutral-500 focus:bg-white/15"
+              />
+
+              {/* Hand-rolled rather than a <select> or <datalist>: 95 artists render as an
+                  unbounded native list with no way to cap its height or search it. */}
+              <div ref={artistBox} className="relative">
+                <button
+                  onClick={() => setArtistOpen(!artistOpen)}
+                  aria-expanded={artistOpen}
+                  aria-haspopup="listbox"
+                  className={`flex w-44 items-center justify-between gap-2 rounded-full px-4 py-1.5 text-xs transition ${
+                    artist ? 'bg-white text-neutral-900' : 'bg-white/10 text-neutral-300 hover:bg-white/20'
+                  }`}
+                >
+                  <span className="truncate">{artist || `All artists (${artists.length})`}</span>
+                  <span className="shrink-0 opacity-60">▾</span>
+                </button>
+
+                {artistOpen && (
+                  <div className="absolute left-0 z-40 mt-1 w-64 overflow-hidden rounded-xl border border-white/10 bg-neutral-900 shadow-2xl shadow-black/50">
+                    <input
+                      autoFocus
+                      value={artistQuery}
+                      onChange={(e) => setArtistQuery(e.target.value)}
+                      placeholder="Search artists…"
+                      aria-label="Search artists"
+                      className="w-full border-b border-white/10 bg-transparent px-4 py-2.5 text-xs outline-none placeholder:text-neutral-500"
+                    />
+                    <ul role="listbox" className="max-h-72 overflow-y-auto py-1">
+                      <li>
+                        <button
+                          onClick={() => {
+                            setArtist('');
+                            setArtistOpen(false);
+                            setArtistQuery('');
+                          }}
+                          className={`flex w-full items-center justify-between px-4 py-1.5 text-left text-xs hover:bg-white/10 ${
+                            artist ? 'text-neutral-300' : 'font-semibold text-white'
+                          }`}
+                        >
+                          All artists
+                          <span className="text-[10px] text-neutral-500">{artists.length}</span>
+                        </button>
+                      </li>
+                      {artistMatches.map((a) => (
+                        <li key={a.name}>
+                          <button
+                            role="option"
+                            aria-selected={a.name === artist}
+                            onClick={() => {
+                              setArtist(a.name);
+                              setArtistOpen(false);
+                              setArtistQuery('');
+                            }}
+                            className={`flex w-full items-center justify-between gap-3 px-4 py-1.5 text-left text-xs hover:bg-white/10 ${
+                              a.name === artist ? 'font-semibold text-white' : 'text-neutral-300'
+                            }`}
+                          >
+                            <span className="truncate">{a.name}</span>
+                            <span className="shrink-0 text-[10px] tabular-nums text-neutral-500">{a.count}</span>
+                          </button>
+                        </li>
+                      ))}
+                      {!artistMatches.length && (
+                        <li className="px-4 py-3 text-center text-xs text-neutral-500">No artist matches.</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as SortKey)}
+                aria-label="Sort by"
+                className="rounded-full bg-white/10 px-3 py-1.5 text-xs outline-none focus:bg-white/15"
               >
-                {f ?? 'All'} ({f ? library.filter((t) => t.folder === f).length : library.length})
+                <option value="artist">Artist</option>
+                <option value="title">Title</option>
+                <option value="album">Album</option>
+                <option value="longest">Longest first</option>
+                <option value="shortest">Shortest first</option>
+              </select>
+
+              <button
+                onClick={() => inLibrary.length && play(inLibrary, 0)}
+                disabled={!inLibrary.length}
+                className="rounded-full bg-white px-4 py-1.5 text-xs font-medium text-neutral-900 transition hover:bg-neutral-200 disabled:opacity-40"
+              >
+                ▶ Play
               </button>
-            ))}
+              <button
+                onClick={() => inLibrary.length && play(shuffled(inLibrary), 0)}
+                disabled={!inLibrary.length}
+                title="Play these in a random order"
+                className="rounded-full bg-white/10 px-4 py-1.5 text-xs transition hover:bg-white/20 disabled:opacity-40"
+              >
+                ⇄ Shuffle
+              </button>
+            </div>
+
+            {(!!needle || !!artist) && (
+              <p className="text-[11px] text-neutral-500">
+                {inLibrary.length} of {library.length} tracks
+                {artist && ` · ${artist}`}
+                {(needle || artist) && (
+                  <button
+                    onClick={() => {
+                      setFilter('');
+                      setArtist('');
+                    }}
+                    className="ml-2 underline underline-offset-2 hover:text-neutral-300"
+                  >
+                    clear
+                  </button>
+                )}
+              </p>
+            )}
           </div>
         )}
 

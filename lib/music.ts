@@ -6,6 +6,8 @@ export type Track = {
   artist: string;
   album: string;
   artwork?: string;
+  /** Bigger cover for the fullscreen view; only fetched when it opens. */
+  artworkLarge?: string;
   appleUrl?: string;
   preview?: string;
   local?: boolean;
@@ -73,7 +75,8 @@ const toTrack = (r: DzTrack): Track => ({
   title: r.title,
   artist: r.artist.name,
   album: r.album?.title ?? '',
-  artwork: r.album?.cover_xl ?? r.album?.cover_big,
+  artwork: r.album?.cover_big ?? r.album?.cover_xl,
+  artworkLarge: r.album?.cover_xl ?? r.album?.cover_big,
   // Deezer has no Apple ids, so deep-link into Apple Music's own search instead.
   appleUrl: `https://music.apple.com/search?term=${encodeURIComponent(`${r.artist.name} ${r.title}`)}`,
   preview: r.preview,
@@ -184,6 +187,18 @@ export async function audioSrc(track: Track, signal?: AbortSignal): Promise<stri
     const file = await get<File>(track.id, blobs());
     return file ? URL.createObjectURL(file) : undefined;
   }
+
+  // Cloudflare's static assets answer a Range request with the whole file and no
+  // Accept-Ranges, so the browser cannot seek — currentTime past the buffer refetches
+  // from byte 0 and playback restarts. preload="auto" is not enough: Chrome buffers
+  // ahead, not to the end (measured 0-169s of a 276s track). Downloading once into a
+  // blob buffers the whole file, so every seek is local. Under a second per track.
+  if (track.id.startsWith('file:') && track.preview) {
+    const res = await fetch(track.preview, { signal });
+    if (!res.ok) throw new Error(`Could not load audio (${res.status})`);
+    return URL.createObjectURL(await res.blob());
+  }
+
   if (!expired(track.preview)) return track.preview;
   const id = track.id.startsWith('deezer:') ? track.id.slice(7) : undefined;
   if (!id) return track.preview;
@@ -213,6 +228,31 @@ export function savePlaylists(p: Playlists) {
     clean[name] = tracks.map((t) => (t.local ? { ...t, artwork: undefined } : t));
   }
   localStorage.setItem(PL_KEY, JSON.stringify(clean));
+}
+
+/**
+ * Tags credit a collaboration as one string — "Pritam, Arijit Singh & Amitabh Bhattacharya"
+ * is three people, and grouping by the raw string buries Arijit Singh across a dozen
+ * near-duplicate entries. Split on comma and ampersand only: "Sachin-Jigar" and
+ * "Dan + Shay" are single acts, so hyphen and plus must be left alone.
+ */
+export const artistsOf = (credit: string) =>
+  credit
+    .split(/\s*[,&]\s*/)
+    .map((a) => a.trim())
+    .filter(Boolean);
+
+/**
+ * Fisher-Yates. Repeatedly picking a random index — the obvious approach — can play the
+ * same track twice before others play at all; a permutation plays each exactly once.
+ */
+export function shuffled<T>(items: T[]): T[] {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 export const fmtTime = (s?: number) => {

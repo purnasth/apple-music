@@ -22,6 +22,7 @@ const walk = async (dir) => {
   const out = [];
   for (const e of await readdir(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
+    if (e.name.startsWith('.')) continue; // .DS_Store and friends aren't assets
     if (e.isDirectory()) out.push(...(await walk(p)));
     else if (AUDIO.test(e.name)) out.push(p);
   }
@@ -40,7 +41,7 @@ for (const file of files) {
   let title = parts.at(-1).replace(/\.[^.]+$/, '');
   let artist = 'Unknown artist';
   let album = '';
-  let duration, artwork;
+  let duration, artwork, artworkLarge;
 
   try {
     const { common, format } = await parseFile(file, { duration: true });
@@ -50,15 +51,21 @@ for (const file of files) {
     duration = format.duration;
     const pic = common.picture?.[0];
     if (pic) {
-      const name = `${createHash('sha1').update(pic.data).digest('hex').slice(0, 16)}.jpg`;
-      artwork = `/songs-art/${name}`;
+      const hash = createHash('sha1').update(pic.data).digest('hex').slice(0, 16);
+      artwork = `/songs-art/${hash}.jpg`;
+      artworkLarge = `/songs-art/${hash}-lg.jpg`;
       // Album art repeats across a record, so hash-name it and convert each one once.
-      if (!seen.has(name)) {
-        seen.add(name);
-        const raw = join(ART, `.raw-${name}`);
+      if (!seen.has(hash)) {
+        seen.add(hash);
+        const raw = join(ART, `.raw-${hash}`);
         await writeFile(raw, pic.data);
-        // 200px covers the 40px list thumbnail and 64px player art even at 2x DPI.
-        await run('sips', ['-Z', '200', '-s', 'format', 'jpeg', '-s', 'formatOptions', '75', raw, '--out', join(ART, name)]);
+        // 200px covers the 40px list thumbnail and 64px player art even at 2x DPI;
+        // the @lg copy is only fetched when the fullscreen view opens.
+        // '-lg' not '@lg': Cloudflare 307-redirects '@' to %40, costing a round trip per open.
+        for (const [px, q, suffix] of [[200, 75, ''], [600, 80, '-lg']]) {
+          await run('sips', ['-Z', String(px), '-s', 'format', 'jpeg', '-s', 'formatOptions', String(q),
+            raw, '--out', join(ART, `${hash}${suffix}.jpg`)]);
+        }
         await rm(raw);
       }
     }
@@ -73,6 +80,7 @@ for (const file of files) {
     artist,
     album,
     artwork,
+    artworkLarge,
     preview: `/songs/${parts.map(encodeURIComponent).join('/')}`,
     duration,
     folder: parts.length > 1 ? parts.at(-2) : undefined,
@@ -82,5 +90,6 @@ for (const file of files) {
 tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 await writeFile('public/songs.json', JSON.stringify(tracks));
 
-const artBytes = (await Promise.all([...seen].map((n) => stat(join(ART, n))))).reduce((s, f) => s + f.size, 0);
-console.log(`${tracks.length} tracks, ${seen.size} covers (${(artBytes / 1e6).toFixed(1)} MB)`);
+const names = [...seen].flatMap((h) => [`${h}.jpg`, `${h}-lg.jpg`]);
+const artBytes = (await Promise.all(names.map((n) => stat(join(ART, n))))).reduce((s, f) => s + f.size, 0);
+console.log(`${tracks.length} tracks, ${seen.size} covers at two sizes (${(artBytes / 1e6).toFixed(1)} MB)`);
