@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated from the song library by `npm run songs`; audio and covers live in R2.
+# songs.json is committed once it points at the bucket rather than the local symlink.
+/public/songs
+/public/songs-art/
+/public/songs.json
