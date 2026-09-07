@@ -13,9 +13,11 @@ import {
   TbPlaylist,
   TbRepeat,
   TbVolume,
+  TbVolumeOff,
   TbX,
 } from "react-icons/tb";
 import { Track, audioSrc, fmtTime, isPreview, shuffled } from "@/lib/music";
+import { SHORTCUTS } from "@/lib/shortcuts";
 import Image from "next/image";
 
 type Props = {
@@ -38,6 +40,7 @@ export default function Player({
   const [time, setTime] = useState(0);
   const [dur, setDur] = useState(0);
   const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
   const [repeat, setRepeat] = useState(false);
   const [shuffle, setShuffle] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +122,10 @@ export default function Player({
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.muted = muted;
+  }, [muted]);
+
   // OS-level media keys / lockscreen controls — free via the native API.
   useEffect(() => {
     if (!("mediaSession" in navigator) || !track) return;
@@ -141,20 +148,97 @@ export default function Player({
     [],
   );
 
-  // Deliberately not the Fullscreen API: this fills the page, it does not take over
-  // the browser chrome. Escape closes it here rather than the browser handling it.
+  // The bindings YouTube, Spotify and Apple Music agree on, and YouTube's where
+  // they differ — see lib/shortcuts.ts for the list this implements. They work
+  // wherever a track is loaded, not only in the full view.
+  //
+  // The full view is deliberately not the Fullscreen API: it fills the page, it
+  // does not take over the browser chrome, so Escape is handled here.
   useEffect(() => {
-    if (!full) return;
     const onKey = (e: KeyboardEvent) => {
-      const typing = (e.target as HTMLElement)?.tagName === "INPUT";
-      if (e.key === "Escape") return setFull(false);
-      if (e.code !== "Space" || typing) return;
-      e.preventDefault();
-      setPlaying(!playing);
+      const el = e.target as HTMLElement | null;
+      // Never steal a keystroke aimed at a field, or one the browser owns.
+      if (el?.isContentEditable) return;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(el?.tagName ?? "")) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const a = audioRef.current;
+      const span = a?.duration || track?.duration || 0;
+      const to = (t: number) => {
+        if (!a || !span) return;
+        a.currentTime = Math.min(Math.max(t, 0), span);
+        setTime(a.currentTime);
+      };
+      const nudgeVolume = (d: number) => {
+        setMuted(false);
+        setVolume((v) => Math.min(Math.max(v + d, 0), 1));
+      };
+
+      // Digits jump to that tenth of the track, the way every video player does.
+      const digit = /^Digit(\d)$/.exec(e.code);
+      if (digit && !e.shiftKey) {
+        e.preventDefault();
+        return to((Number(digit[1]) / 10) * span);
+      }
+
+      switch (e.code) {
+        case "Escape":
+          return setFull(false);
+        case "Space":
+        case "KeyK":
+          e.preventDefault();
+          return setPlaying(!playing);
+        case "KeyF":
+        case "KeyI":
+          e.preventDefault();
+          return setFull(!full);
+        case "KeyN":
+          if (!e.shiftKey) return;
+          e.preventDefault();
+          return next();
+        case "KeyP":
+          if (!e.shiftKey) return;
+          e.preventDefault();
+          return prev();
+        case "KeyJ":
+          e.preventDefault();
+          return to((a?.currentTime ?? 0) - 10);
+        case "KeyL":
+          e.preventDefault();
+          return to((a?.currentTime ?? 0) + 10);
+        case "ArrowLeft":
+          e.preventDefault();
+          return to((a?.currentTime ?? 0) - 5);
+        case "ArrowRight":
+          e.preventDefault();
+          return to((a?.currentTime ?? 0) + 5);
+        case "ArrowUp":
+          e.preventDefault();
+          return nudgeVolume(0.05);
+        case "ArrowDown":
+          e.preventDefault();
+          return nudgeVolume(-0.05);
+        case "KeyM":
+          e.preventDefault();
+          return setMuted((m) => !m);
+        case "KeyS":
+          e.preventDefault();
+          return setShuffle(!shuffle);
+        case "KeyR":
+          e.preventDefault();
+          return setRepeat(!repeat);
+        case "Home":
+          e.preventDefault();
+          return to(0);
+        case "End":
+          e.preventDefault();
+          return to(span);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [full, playing, setPlaying]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [full, playing, shuffle, repeat, track, index, queue]);
 
   // The page behind must not scroll while the overlay covers it.
   useEffect(() => {
@@ -207,6 +291,8 @@ export default function Player({
           setRepeat={setRepeat}
           volume={volume}
           setVolume={setVolume}
+          muted={muted}
+          setMuted={setMuted}
           error={error}
           onClose={() => setFull(false)}
         />
@@ -310,14 +396,25 @@ export default function Player({
               </Btn>
             </span>
             <span className="ml-2 hidden items-center gap-2 sm:flex">
-              <TbVolume className="shrink-0 text-label-2" />
+              <button
+                onClick={() => setMuted(!muted)}
+                aria-label={muted ? "Unmute" : "Mute"}
+                title={muted ? "Unmute (M)" : "Mute (M)"}
+                aria-pressed={muted}
+                className="shrink-0 text-label-2 transition hover:text-label"
+              >
+                {muted ? <TbVolumeOff size={16} /> : <TbVolume size={16} />}
+              </button>
               <input
                 type="range"
                 min={0}
                 max={1}
                 step={0.01}
-                value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
+                value={muted ? 0 : volume}
+                onChange={(e) => {
+                  setMuted(false);
+                  setVolume(Number(e.target.value));
+                }}
                 className="h-1 w-20 accent-[var(--color-accent)]"
                 aria-label="Volume"
               />
@@ -375,6 +472,8 @@ function FullView({
   setRepeat,
   volume,
   setVolume,
+  muted,
+  setMuted,
   error,
   onClose,
 }: {
@@ -396,6 +495,8 @@ function FullView({
   setRepeat: (r: boolean) => void;
   volume: number;
   setVolume: (v: number) => void;
+  muted: boolean;
+  setMuted: (m: boolean) => void;
   error: string | null;
   onClose: () => void;
 }) {
@@ -604,20 +705,31 @@ function FullView({
             </div>
 
             <span className="mt-6 hidden items-center gap-2 sm:flex">
-              <TbVolume className="shrink-0 text-white/60" />
+              <button
+                onClick={() => setMuted(!muted)}
+                aria-label={muted ? "Unmute" : "Mute"}
+                title={muted ? "Unmute (M)" : "Mute (M)"}
+                aria-pressed={muted}
+                className="shrink-0 text-white/60 transition hover:text-white"
+              >
+                {muted ? <TbVolumeOff size={16} /> : <TbVolume size={16} />}
+              </button>
               <input
                 type="range"
                 min={0}
                 max={1}
                 step={0.01}
-                value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
+                value={muted ? 0 : volume}
+                onChange={(e) => {
+                  setMuted(false);
+                  setVolume(Number(e.target.value));
+                }}
                 className="h-1 w-40 accent-white"
                 aria-label="Volume"
               />
             </span>
             <p className="mt-4 hidden text-[11px] text-white/50 sm:block">
-              Space to play or pause · Esc to close
+              {SHORTCUTS.length} keyboard shortcuts — press ? to see them
             </p>
           </div>
         </div>

@@ -12,12 +12,14 @@ import {
   TbPlayerPlayFilled,
   TbPlaylist,
   TbPlus,
+  TbKeyboard,
   TbSearch,
   TbTrash,
   TbUpload,
   TbX,
 } from "react-icons/tb";
 import Player from "@/components/Player";
+import { SHORTCUTS } from "@/lib/shortcuts";
 import {
   Track,
   Playlists,
@@ -84,6 +86,8 @@ export default function Home() {
   const [playing, setPlaying] = useState(false);
 
   const [scrolled, setScrolled] = useState(false);
+  const [showKeys, setShowKeys] = useState(false);
+  const searchBox = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getLibrary().then(setLibrary);
@@ -93,6 +97,29 @@ export default function Home() {
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [tab]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing =
+        el?.isContentEditable ||
+        /^(INPUT|TEXTAREA|SELECT)$/.test(el?.tagName ?? "");
+      if (e.key === "Escape" && typing) return el?.blur();
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "?") {
+        e.preventDefault();
+        setShowKeys((v) => !v);
+      } else if (e.key === "/") {
+        e.preventDefault();
+        setTab("search");
+        searchBox.current?.focus();
+      } else if (e.key === "Escape") {
+        setShowKeys(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // The scroll edge effect: no separator at rest, a hairline once content slides
   // under the bar (HIG — Layout > Visual hierarchy).
@@ -268,6 +295,7 @@ export default function Home() {
               size={14}
             />
             <input
+              ref={searchBox}
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -579,6 +607,17 @@ export default function Home() {
         </ul>
       </main>
 
+      <button
+        onClick={() => setShowKeys(true)}
+        aria-label="Keyboard shortcuts"
+        title="Keyboard shortcuts (?)"
+        className="fixed bottom-36 right-4 z-30 hidden h-9 w-9 place-items-center rounded-full bg-fill text-label-2 backdrop-blur transition hover:bg-fill-2 hover:text-label sm:bottom-24 sm:grid"
+      >
+        <TbKeyboard size={17} />
+      </button>
+
+      {showKeys && <ShortcutSheet onClose={() => setShowKeys(false)} />}
+
       <Player
         queue={queue}
         index={qIndex}
@@ -608,6 +647,61 @@ export default function Home() {
           ))}
         </div>
       </nav>
+    </div>
+  );
+}
+
+function ShortcutSheet({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Keyboard shortcuts"
+      className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="glass-thick max-h-[80vh] w-full max-w-md overflow-y-auto overscroll-contain rounded-sheet border border-separator p-5 shadow-2xl shadow-black/60"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Keyboard shortcuts</h2>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            title="Close"
+            className="grid h-8 w-8 place-items-center rounded-full text-label-2 transition hover:bg-fill hover:text-label"
+          >
+            <TbX size={16} />
+          </button>
+        </div>
+        <dl className="space-y-1">
+          {SHORTCUTS.map(({ keys, label }) => (
+            <div
+              key={label}
+              className="flex items-center justify-between gap-4 rounded-control px-2 py-1.5 text-xs odd:bg-fill/40"
+            >
+              <dt className="text-label-2">{label}</dt>
+              <dd className="flex shrink-0 items-center gap-1">
+                {keys.map((k) =>
+                  k === "–" ? (
+                    <span key={k} className="text-label-3">
+                      –
+                    </span>
+                  ) : (
+                    <kbd
+                      key={k}
+                      className="min-w-6 rounded-[5px] border border-separator bg-elevated-2 px-1.5 py-0.5 text-center font-sans text-[11px] text-label"
+                    >
+                      {k}
+                    </kbd>
+                  ),
+                )}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </div>
     </div>
   );
 }
