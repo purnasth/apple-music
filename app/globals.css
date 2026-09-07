@@ -9,11 +9,12 @@
    can shift without hunting down literals (HIG — Color > System colors).
    Dark-only is the sanctioned exception for immersive media apps (HIG — Dark Mode).
 
-   Backgrounds come in two levels: base recedes, elevated advances. Labels come in
+   Backgrounds come in two levels: the canvas recedes, elevated surfaces advance.
+   Labels come in
    three vibrancy levels, each checked against #000: 19.8:1, 7.3:1, 5.6:1 — all clear
    the 4.5:1 body-text minimum (HIG — Accessibility > color contrast). */
 @theme {
-  --color-base: #000000;
+  --color-canvas: #000000;
   --color-elevated: #1c1c1e;
   --color-elevated-2: #2c2c2e;
 
@@ -41,7 +42,7 @@ html {
 
 body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
-  background: var(--color-base);
+  background: var(--color-canvas);
   color: var(--color-label);
 }
 
@@ -53,7 +54,7 @@ body {
    Written as @utility rather than a plain rule: Lightning CSS drops a hand-authored
    backdrop-filter here, but keeps the one Tailwind's own utilities compose. */
 @utility glass {
-  @apply bg-base/72 backdrop-blur-[30px] backdrop-saturate-[1.8];
+  @apply bg-canvas/72 backdrop-blur-[30px] backdrop-saturate-[1.8];
 }
 
 /* Popovers sit over content rather than a screen edge, so they take the opaquer
@@ -65,7 +66,7 @@ body {
 /* Transparency is decoration, not information: honour the system setting. */
 @media (prefers-reduced-transparency: reduce) {
   .glass {
-    background: var(--color-base);
+    background: var(--color-canvas);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
