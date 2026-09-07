@@ -19,7 +19,7 @@ import {
   TbX,
 } from "react-icons/tb";
 import Player from "@/components/Player";
-import { SHORTCUTS } from "@/lib/shortcuts";
+import { SHORTCUT_GROUPS } from "@/lib/shortcuts";
 import {
   Track,
   Playlists,
@@ -662,45 +662,65 @@ function ShortcutSheet({ onClose }: { onClose: () => void }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="glass-thick max-h-[80vh] w-full max-w-md overflow-y-auto overscroll-contain rounded-sheet border border-separator p-5 shadow-2xl shadow-black/60"
+        className="glass-thick max-h-[85vh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-sheet border border-separator px-5 pb-5 shadow-2xl shadow-black/60"
       >
-        <div className="mb-4 flex items-center justify-between">
+        {/* Sticky so the close button survives a scroll on a short screen. */}
+        <div className="glass-thick sticky top-0 -mx-5 flex items-center justify-between px-5 py-3.5">
           <h2 className="text-sm font-semibold">Keyboard shortcuts</h2>
           <button
             onClick={onClose}
             aria-label="Close"
             title="Close"
-            className="grid h-8 w-8 place-items-center rounded-full text-label-2 transition hover:bg-fill hover:text-label"
+            className="grid h-7 w-7 place-items-center rounded-full text-label-2 transition hover:bg-fill hover:text-label"
           >
-            <TbX size={16} />
+            <TbX size={15} />
           </button>
         </div>
-        <dl className="space-y-1">
-          {SHORTCUTS.map(({ keys, label }) => (
-            <div
-              key={label}
-              className="flex items-center justify-between gap-4 rounded-control px-2 py-1.5 text-xs odd:bg-fill/40"
-            >
-              <dt className="text-label-2">{label}</dt>
-              <dd className="flex shrink-0 items-center gap-1">
-                {keys.map((k) =>
-                  k === "–" ? (
-                    <span key={k} className="text-label-3">
-                      –
-                    </span>
-                  ) : (
-                    <kbd
-                      key={k}
-                      className="min-w-6 rounded-[5px] border border-separator bg-elevated-2 px-1.5 py-0.5 text-center font-sans text-[11px] text-label"
-                    >
-                      {k}
-                    </kbd>
-                  ),
-                )}
-              </dd>
-            </div>
+
+        {/* Two columns of tight groups rather than one long striped list: the
+            heading carries the grouping, so the rows need no banding and no
+            padding of their own. */}
+        <div className="columns-1 gap-x-7 sm:columns-2">
+          {SHORTCUT_GROUPS.map(({ title, items }) => (
+            <section key={title} className="mb-4 break-inside-avoid">
+              <h3 className="mb-1 border-b border-separator pb-1 text-[10px] font-semibold uppercase tracking-widest text-label-3">
+                {title}
+              </h3>
+              <dl>
+                {items.map(({ keys, label }) => (
+                  <div
+                    key={label}
+                    className="flex items-baseline gap-2 py-[3px] text-xs"
+                  >
+                    <dt className="shrink-0 text-label-2">{label}</dt>
+                    {/* A dotted leader ties the label to its keys without a row
+                        background doing the work. */}
+                    <span
+                      aria-hidden
+                      className="min-w-3 flex-1 translate-y-[-3px] border-b border-dotted border-separator"
+                    />
+                    <dd className="flex shrink-0 items-center gap-1">
+                      {keys.map((k) =>
+                        k === "\u2013" ? (
+                          <span key={k} className="text-label-3">
+                            &ndash;
+                          </span>
+                        ) : (
+                          <kbd
+                            key={k}
+                            className="min-w-5 rounded-[5px] bg-fill-2 px-1.5 py-0.5 text-center font-sans text-[10px] leading-4 text-label"
+                          >
+                            {k}
+                          </kbd>
+                        ),
+                      )}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
           ))}
-        </dl>
+        </div>
       </div>
     </div>
   );

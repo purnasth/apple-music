@@ -17,7 +17,6 @@ import {
   TbX,
 } from "react-icons/tb";
 import { Track, audioSrc, fmtTime, isPreview, shuffled } from "@/lib/music";
-import { SHORTCUTS } from "@/lib/shortcuts";
 import Image from "next/image";
 
 type Props = {
@@ -45,10 +44,17 @@ export default function Player({
   const [shuffle, setShuffle] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
+  const [showQueue, setShowQueue] = useState(false);
   const [loading, setLoading] = useState(false);
   const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
+
+  /** The queue comes back with the view, but only where there is room for it. */
+  const openFull = (withQueue: boolean) => {
+    setShowQueue(withQueue && window.innerWidth >= 1024);
+    setFull(true);
+  };
 
   // A fixed shuffled order, not a fresh random pick each time: picking randomly on every
   // skip can repeat a track while others never play, and makes Previous meaningless.
@@ -188,10 +194,17 @@ export default function Player({
         case "KeyK":
           e.preventDefault();
           return setPlaying(!playing);
-        case "KeyF":
+        // I is the plain full view; F drives towards the immersive one, dropping
+        // the queue on the way and leaving altogether once there is nothing left
+        // to drop.
         case "KeyI":
           e.preventDefault();
-          return setFull(!full);
+          return full ? setFull(false) : openFull(true);
+        case "KeyF":
+          e.preventDefault();
+          if (!full) return openFull(false);
+          if (showQueue) return setShowQueue(false);
+          return setFull(false);
         case "KeyN":
           if (!e.shiftKey) return;
           e.preventDefault();
@@ -238,7 +251,7 @@ export default function Player({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [full, playing, shuffle, repeat, track, index, queue]);
+  }, [full, showQueue, playing, shuffle, repeat, track, index, queue]);
 
   // The page behind must not scroll while the overlay covers it.
   useEffect(() => {
@@ -293,6 +306,8 @@ export default function Player({
           setVolume={setVolume}
           muted={muted}
           setMuted={setMuted}
+          showQueue={showQueue}
+          setShowQueue={setShowQueue}
           error={error}
           onClose={() => setFull(false)}
         />
@@ -305,7 +320,7 @@ export default function Player({
       >
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-2 sm:gap-4 sm:px-4 sm:py-3">
           <button
-            onClick={() => setFull(true)}
+            onClick={() => openFull(true)}
             aria-label="Play fullscreen"
             title="Play fullscreen"
             className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-[8px] shadow-sm shadow-black/40 sm:h-14 sm:w-14"
@@ -474,6 +489,8 @@ function FullView({
   setVolume,
   muted,
   setMuted,
+  showQueue,
+  setShowQueue,
   error,
   onClose,
 }: {
@@ -497,12 +514,12 @@ function FullView({
   setVolume: (v: number) => void;
   muted: boolean;
   setMuted: (m: boolean) => void;
+  showQueue: boolean;
+  setShowQueue: (s: boolean) => void;
   error: string | null;
   onClose: () => void;
 }) {
   const art = track.artworkLarge ?? track.artwork;
-  // Full width of a phone, so it starts closed there and open where there is room.
-  const [showQueue, setShowQueue] = useState(() => window.innerWidth >= 1024);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-canvas text-white">
@@ -728,9 +745,6 @@ function FullView({
                 aria-label="Volume"
               />
             </span>
-            <p className="mt-4 hidden text-[11px] text-white/50 sm:block">
-              {SHORTCUTS.length} keyboard shortcuts — press ? to see them
-            </p>
           </div>
         </div>
       </div>
