@@ -434,7 +434,7 @@ function FullView({
             showQueue ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <h3 className="px-5 pb-3 pt-6 text-xs font-semibold uppercase text-white/60 tracking-widest">
+          <h3 className="px-5 py-6 text-xs font-semibold uppercase text-white/60 tracking-widest">
             Playing next · {queue.length} song{queue.length === 1 ? "" : "s"}
           </h3>
           <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
