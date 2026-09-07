@@ -1,21 +1,22 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from "react";
 import {
   TbArrowsMaximize,
   TbArrowsShuffle,
   TbChevronLeft,
+  TbChevronRight,
   TbMusic,
   TbPlayerPauseFilled,
   TbPlayerPlayFilled,
   TbPlayerSkipBackFilled,
   TbPlayerSkipForwardFilled,
-  TbPlaylist,
   TbRepeat,
   TbVolume,
   TbX,
-} from 'react-icons/tb';
-import { Track, audioSrc, fmtTime, isPreview, shuffled } from '@/lib/music';
+} from "react-icons/tb";
+import { Track, audioSrc, fmtTime, isPreview, shuffled } from "@/lib/music";
+import Image from "next/image";
 
 type Props = {
   queue: Track[];
@@ -25,7 +26,13 @@ type Props = {
   setPlaying: (p: boolean) => void;
 };
 
-export default function Player({ queue, index, setIndex, playing, setPlaying }: Props) {
+export default function Player({
+  queue,
+  index,
+  setIndex,
+  playing,
+  setPlaying,
+}: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const objectUrl = useRef<string | null>(null);
   const [time, setTime] = useState(0);
@@ -55,7 +62,8 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
     if (!queue.length) return;
     const path = order ?? queue.map((_, i) => i);
     const at = Math.max(path.indexOf(index), 0) + delta;
-    if (at >= path.length) return repeat ? setIndex(path[0]) : setPlaying(false);
+    if (at >= path.length)
+      return repeat ? setIndex(path[0]) : setPlaying(false);
     setIndex(path[at < 0 ? path.length - 1 : at]);
   };
 
@@ -80,13 +88,17 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
     audioSrc(track)
       .then((src) => {
         if (cancelled || !audioRef.current) return;
-        if (!src) return setError('No playable audio for this track.');
+        if (!src) return setError("No playable audio for this track.");
         if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-        objectUrl.current = src.startsWith('blob:') ? src : null;
+        objectUrl.current = src.startsWith("blob:") ? src : null;
         audioRef.current.src = src;
         if (playing) audioRef.current.play().catch(() => setPlaying(false));
       })
-      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : 'Could not load audio.'))
+      .catch(
+        (e) =>
+          !cancelled &&
+          setError(e instanceof Error ? e.message : "Could not load audio."),
+      )
       .finally(() => !cancelled && setLoading(false));
 
     return () => {
@@ -109,42 +121,46 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
 
   // OS-level media keys / lockscreen controls — free via the native API.
   useEffect(() => {
-    if (!('mediaSession' in navigator) || !track) return;
+    if (!("mediaSession" in navigator) || !track) return;
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.artist,
       album: track.album,
-      artwork: track.artwork ? [{ src: track.artwork, sizes: '600x600' }] : [],
+      artwork: track.artwork ? [{ src: track.artwork, sizes: "600x600" }] : [],
     });
-    navigator.mediaSession.setActionHandler('play', () => setPlaying(true));
-    navigator.mediaSession.setActionHandler('pause', () => setPlaying(false));
-    navigator.mediaSession.setActionHandler('previoustrack', prev);
-    navigator.mediaSession.setActionHandler('nexttrack', next);
+    navigator.mediaSession.setActionHandler("play", () => setPlaying(true));
+    navigator.mediaSession.setActionHandler("pause", () => setPlaying(false));
+    navigator.mediaSession.setActionHandler("previoustrack", prev);
+    navigator.mediaSession.setActionHandler("nexttrack", next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track, index, queue, shuffle, repeat]);
 
-  useEffect(() => () => void (objectUrl.current && URL.revokeObjectURL(objectUrl.current)), []);
+  useEffect(
+    () => () =>
+      void (objectUrl.current && URL.revokeObjectURL(objectUrl.current)),
+    [],
+  );
 
   // Deliberately not the Fullscreen API: this fills the page, it does not take over
   // the browser chrome. Escape closes it here rather than the browser handling it.
   useEffect(() => {
     if (!full) return;
     const onKey = (e: KeyboardEvent) => {
-      const typing = (e.target as HTMLElement)?.tagName === 'INPUT';
-      if (e.key === 'Escape') return setFull(false);
-      if (e.code !== 'Space' || typing) return;
+      const typing = (e.target as HTMLElement)?.tagName === "INPUT";
+      if (e.key === "Escape") return setFull(false);
+      if (e.code !== "Space" || typing) return;
       e.preventDefault();
       setPlaying(!playing);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [full, playing, setPlaying]);
 
   // The page behind must not scroll while the overlay covers it.
   useEffect(() => {
     if (!full) return;
     const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    document.body.style.overflow = "hidden";
     return () => void (document.body.style.overflow = prevOverflow);
   }, [full]);
 
@@ -168,7 +184,7 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
         onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
         onEnded={next}
-        onError={() => setError('Playback failed.')}
+        onError={() => setError("Playback failed.")}
       />
 
       {full && (
@@ -198,94 +214,116 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
 
       <div
         className={`glass fixed inset-x-0 bottom-14 z-40 border-t border-separator sm:bottom-0 ${
-          full ? 'hidden' : ''
+          full ? "hidden" : ""
         }`}
       >
-      <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-2 sm:gap-4 sm:px-4 sm:py-3">
-        <button
-          onClick={() => setFull(true)}
-          aria-label="Play fullscreen"
-          title="Play fullscreen"
-          className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-[8px] shadow-sm shadow-black/40 sm:h-14 sm:w-14"
-        >
-          {track.artwork ? (
-            <img src={track.artwork} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <div className="grid h-full w-full place-items-center bg-fill text-label-3">
-              <TbMusic size={22} />
-            </div>
-          )}
-          <span className="absolute inset-0 grid place-items-center bg-black/55 text-white opacity-0 transition group-hover:opacity-100">
-            <TbArrowsMaximize size={20} />
-          </span>
-        </button>
-
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium" title={track.title}>
-            {track.title}
-          </div>
-          <div className="truncate text-xs text-label-2">
-            {track.artist}
-            {isPreview(track) ? ' · 30s preview' : ''}
-          </div>
-          {error && <div className="truncate text-xs text-accent">{error}</div>}
-
-          <div className="mt-1.5 flex items-center gap-2">
-            <span className="w-9 text-right text-[10px] tabular-nums text-label-3">{fmtTime(time)}</span>
-            <input
-              type="range"
-              min={0}
-              max={seekMax}
-              value={time}
-              step={0.1}
-              onChange={(e) => seek(Number(e.target.value))}
-              className="h-1 flex-1 accent-[var(--color-accent)]"
-              aria-label="Seek"
-            />
-            <span className="w-9 text-[10px] tabular-nums text-label-3">{fmtTime(seekMax)}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1">
-          <span className="hidden sm:block">
-            <Btn onClick={() => setShuffle(!shuffle)} active={shuffle} label="Shuffle">
-              <TbArrowsShuffle />
-            </Btn>
-          </span>
-          <Btn onClick={prev} label="Previous">
-            <TbPlayerSkipBackFilled />
-          </Btn>
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-2 sm:gap-4 sm:px-4 sm:py-3">
           <button
-            onClick={() => setPlaying(!playing)}
-            aria-label={playing ? 'Pause' : 'Play'}
-            title={playing ? 'Pause' : 'Play'}
-            className="grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
+            onClick={() => setFull(true)}
+            aria-label="Play fullscreen"
+            title="Play fullscreen"
+            className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-[8px] shadow-sm shadow-black/40 sm:h-14 sm:w-14"
           >
-            {playing ? <TbPlayerPauseFilled size={18} /> : <TbPlayerPlayFilled size={18} className="ml-0.5" />}
+            {track.artwork ? (
+              <img
+                src={track.artwork}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="grid h-full w-full place-items-center bg-fill text-label-3">
+                <TbMusic size={22} />
+              </div>
+            )}
+            <span className="absolute inset-0 grid place-items-center bg-black/55 text-white opacity-0 transition group-hover:opacity-100">
+              <TbArrowsMaximize size={20} />
+            </span>
           </button>
-          <Btn onClick={next} label="Next">
-            <TbPlayerSkipForwardFilled />
-          </Btn>
-          <span className="hidden sm:block">
-            <Btn onClick={() => setRepeat(!repeat)} active={repeat} label="Repeat">
-              <TbRepeat />
+
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium" title={track.title}>
+              {track.title}
+            </div>
+            <div className="truncate text-xs text-label-2">
+              {track.artist}
+              {isPreview(track) ? " · 30s preview" : ""}
+            </div>
+            {error && (
+              <div className="truncate text-xs text-accent">{error}</div>
+            )}
+
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className="w-9 text-right text-[10px] tabular-nums text-label-3">
+                {fmtTime(time)}
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={seekMax}
+                value={time}
+                step={0.1}
+                onChange={(e) => seek(Number(e.target.value))}
+                className="h-1 flex-1 accent-[var(--color-accent)]"
+                aria-label="Seek"
+              />
+              <span className="w-9 text-[10px] tabular-nums text-label-3">
+                {fmtTime(seekMax)}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <span className="hidden sm:block">
+              <Btn
+                onClick={() => setShuffle(!shuffle)}
+                active={shuffle}
+                label="Shuffle"
+              >
+                <TbArrowsShuffle />
+              </Btn>
+            </span>
+            <Btn onClick={prev} label="Previous">
+              <TbPlayerSkipBackFilled />
             </Btn>
-          </span>
-          <span className="ml-2 hidden items-center gap-2 sm:flex">
-            <TbVolume className="shrink-0 text-label-2" />
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={volume}
-              onChange={(e) => setVolume(Number(e.target.value))}
-              className="h-1 w-20 accent-[var(--color-accent)]"
-              aria-label="Volume"
-            />
-          </span>
+            <button
+              onClick={() => setPlaying(!playing)}
+              aria-label={playing ? "Pause" : "Play"}
+              title={playing ? "Pause" : "Play"}
+              className="grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
+            >
+              {playing ? (
+                <TbPlayerPauseFilled size={18} />
+              ) : (
+                <TbPlayerPlayFilled size={18} className="ml-0.5" />
+              )}
+            </button>
+            <Btn onClick={next} label="Next">
+              <TbPlayerSkipForwardFilled />
+            </Btn>
+            <span className="hidden sm:block">
+              <Btn
+                onClick={() => setRepeat(!repeat)}
+                active={repeat}
+                label="Repeat"
+              >
+                <TbRepeat />
+              </Btn>
+            </span>
+            <span className="ml-2 hidden items-center gap-2 sm:flex">
+              <TbVolume className="shrink-0 text-label-2" />
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={volume}
+                onChange={(e) => setVolume(Number(e.target.value))}
+                className="h-1 w-20 accent-[var(--color-accent)]"
+                aria-label="Volume"
+              />
+            </span>
+          </div>
         </div>
-      </div>
       </div>
     </>
   );
@@ -309,7 +347,7 @@ function Btn({
       title={label}
       aria-pressed={active}
       className={`grid h-8 w-8 place-items-center rounded-full text-sm transition hover:bg-fill active:scale-95 ${
-        active ? 'text-accent' : 'text-label-2 hover:text-label'
+        active ? "text-accent" : "text-label-2 hover:text-label"
       }`}
     >
       {children}
@@ -381,72 +419,98 @@ function FullView({
       <div className="pointer-events-none absolute inset-0 bg-black/55" />
 
       <button
-        onClick={() => setShowQueue(!showQueue)}
-        aria-label={showQueue ? 'Hide queue' : 'Show queue'}
-        aria-expanded={showQueue}
-        title={showQueue ? 'Hide queue' : 'Show queue'}
-        className="absolute left-5 top-5 z-30 grid h-10 w-10 place-items-center rounded-full bg-white/15 backdrop-blur-xl transition hover:bg-white/25 active:scale-95"
-      >
-        {showQueue ? <TbChevronLeft size={20} /> : <TbPlaylist size={18} />}
-      </button>
-
-      <button
         onClick={onClose}
         aria-label="Close"
-        className="absolute right-5 top-5 z-20 grid h-10 w-10 place-items-center rounded-full bg-white/15 backdrop-blur-xl transition hover:bg-white/25 active:scale-95"
+        className="absolute right-5 top-5 z-20 grid h-8 w-8 place-items-center rounded-full bg-white/15 backdrop-blur-xl transition hover:bg-white/25 active:scale-95"
       >
-        <TbX size={20} />
+        <TbX size={16} />
       </button>
 
       <div className="relative z-10 flex h-full">
-        {showQueue && (
-        <aside className="absolute inset-y-0 left-0 z-20 flex w-[min(18rem,85vw)] shrink-0 flex-col border-r border-white/10 bg-black/55 backdrop-blur-2xl lg:relative lg:z-10 lg:bg-black/30">
-          <h3 className="px-5 pb-3 pt-20 text-xs font-semibold uppercase tracking-wider text-white/60">
-            Playing next · {queue.length}
-          </h3>
-          <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
-            {queue.map((t, i) => {
-              const current = i === index;
-              return (
-                <li key={`${t.id}-${i}`}>
-                  <button
-                    onClick={() => setIndex(i)}
-                    aria-current={current}
-                    title={`${t.title} — ${t.artist}`}
-                    className={`flex w-full items-center gap-3 px-5 py-2 text-left transition hover:bg-white/10 ${
-                      current ? 'bg-white/15' : i < index ? 'opacity-50' : ''
-                    }`}
-                  >
-                    <span className="grid w-4 shrink-0 place-items-center text-[10px] tabular-nums text-white/60">
-                      {current ? (
-                        playing ? (
-                          <TbPlayerPlayFilled className="text-accent" />
+        <div
+          className={`absolute inset-y-0 left-0 z-20 flex w-[min(20rem,85vw)] shrink-0 transition-[transform,margin] duration-300 ease-out lg:relative lg:z-10 ${
+            showQueue ? "" : "-translate-x-full lg:translate-x-0 lg:-ml-80"
+          }`}
+        >
+          <aside
+            // Off-screen, it is out of the tab order and out of the accessibility tree.
+            inert={!showQueue}
+            className="flex min-w-0 flex-1 flex-col border-r border-white/10 bg-black/55 backdrop-blur-2xl lg:bg-black/30"
+          >
+            <h3 className="px-5 pb-3 pt-6 text-xs font-semibold uppercase text-white/60 tracking-widest">
+              Playing next · {queue.length} song{queue.length === 1 ? "" : "s"}
+            </h3>
+            <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
+              {queue.map((t, i) => {
+                const current = i === index;
+                return (
+                  <li key={`${t.id}-${i}`}>
+                    <button
+                      onClick={() => setIndex(i)}
+                      aria-current={current}
+                      title={`${t.title} — ${t.artist}`}
+                      className={`flex w-full items-center gap-2 pl-3 pr-4 py-2 text-left transition hover:bg-white/10 ${
+                        current ? "bg-white/15" : i < index ? "opacity-50" : ""
+                      }`}
+                    >
+                      <span className="grid w-4 shrink-0 place-items-center text-[10px] tabular-nums text-white/60">
+                        {current ? (
+                          playing ? (
+                            <TbPlayerPlayFilled className="text-accent" />
+                          ) : (
+                            <TbPlayerPauseFilled className="text-accent" />
+                          )
                         ) : (
-                          <TbPlayerPauseFilled className="text-accent" />
-                        )
-                      ) : (
-                        i + 1
-                      )}
-                    </span>
-                    {t.artwork ? (
-                      <img src={t.artwork} alt="" className="h-9 w-9 shrink-0 rounded-[6px] object-cover" />
-                    ) : (
-                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[6px] bg-white/10 text-white/50">
-                        <TbMusic size={16} />
+                          i + 1
+                        )}
                       </span>
-                    )}
-                    <span className="min-w-0 flex-1">
-                      <span className={`block truncate text-xs ${current ? 'font-semibold' : ''}`}>{t.title}</span>
-                      <span className="block truncate text-[11px] text-white/60">{t.artist}</span>
-                    </span>
-                    <span className="shrink-0 text-[10px] tabular-nums text-white/50">{fmtTime(t.duration)}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        </aside>
-        )}
+                      {t.artwork ? (
+                        <Image
+                          width={36}
+                          height={36}
+                          src={t.artwork}
+                          alt={`${t.album || t.title} cover`}
+                          className="shrink-0 rounded-[6px] object-cover"
+                        />
+                      ) : (
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[6px] bg-white/10 text-white/50">
+                          <TbMusic size={16} />
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={`block truncate text-xs ${current ? "font-semibold" : ""}`}
+                        >
+                          {t.title}
+                        </span>
+                        <span className="block truncate text-[11px] text-white/60">
+                          {t.artist}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xxs tabular-nums text-white/50">
+                        {fmtTime(t.duration)}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </aside>
+
+          {/* Straddles the drawer's trailing edge and travels with it, so closing
+              parks it half-off the screen instead of spending a corner on it. */}
+          <button
+            onClick={() => setShowQueue(!showQueue)}
+            aria-label={showQueue ? "Hide queue" : "Show queue"}
+            aria-expanded={showQueue}
+            title={showQueue ? "Hide queue" : "Show queue"}
+            className="group absolute right-0 top-1/2 z-30 flex h-16 w-7 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full border border-white/10 bg-white/10 backdrop-blur-xl transition hover:bg-white/20 active:scale-95"
+          >
+            <span className="transition-transform duration-300 ease-out group-hover:scale-110">
+              {showQueue ? <TbChevronLeft size={15} /> : <TbChevronRight size={15} />}
+            </span>
+          </button>
+        </div>
 
         <div className="flex min-w-0 flex-1 flex-col items-center overflow-y-auto px-4 py-16 sm:px-6">
           <div className="my-auto flex w-full max-w-lg flex-col items-center">
@@ -463,18 +527,28 @@ function FullView({
             )}
 
             <div className="mt-6 w-full text-center">
-              <h2 className="truncate text-2xl font-semibold tracking-tight">{track.title}</h2>
+              <h2 className="truncate text-2xl font-semibold tracking-tight">
+                {track.title}
+              </h2>
               <p className="mt-1 truncate text-sm text-white/70">
                 {track.artist}
-                {isPreview(track) ? ' · 30s preview' : ''}
+                {isPreview(track) ? " · 30s preview" : ""}
               </p>
-              {track.album && <p className="mt-0.5 truncate text-xs text-white/50">{track.album}</p>}
-              {loading && <p className="mt-2 text-xs text-white/60">Loading…</p>}
+              {track.album && (
+                <p className="mt-0.5 truncate text-xs text-white/50">
+                  {track.album}
+                </p>
+              )}
+              {loading && (
+                <p className="mt-2 text-xs text-white/60">Loading…</p>
+              )}
               {error && <p className="mt-2 text-sm text-accent">{error}</p>}
             </div>
 
             <div className="mt-5 flex w-full items-center gap-3">
-              <span className="w-10 text-right text-xs tabular-nums text-white/60">{fmtTime(time)}</span>
+              <span className="w-10 text-right text-xs tabular-nums text-white/60">
+                {fmtTime(time)}
+              </span>
               <input
                 type="range"
                 min={0}
@@ -485,11 +559,17 @@ function FullView({
                 className="h-1 flex-1 accent-white"
                 aria-label="Seek"
               />
-              <span className="w-10 text-xs tabular-nums text-white/60">{fmtTime(dur)}</span>
+              <span className="w-10 text-xs tabular-nums text-white/60">
+                {fmtTime(dur)}
+              </span>
             </div>
 
             <div className="mt-5 flex items-center gap-5">
-              <Btn onClick={() => setShuffle(!shuffle)} active={shuffle} label="Shuffle">
+              <Btn
+                onClick={() => setShuffle(!shuffle)}
+                active={shuffle}
+                label="Shuffle"
+              >
                 <TbArrowsShuffle size={18} />
               </Btn>
               <Btn onClick={prev} label="Previous">
@@ -497,16 +577,24 @@ function FullView({
               </Btn>
               <button
                 onClick={() => setPlaying(!playing)}
-                aria-label={playing ? 'Pause' : 'Play'}
-                title={playing ? 'Pause' : 'Play'}
+                aria-label={playing ? "Pause" : "Play"}
+                title={playing ? "Pause" : "Play"}
                 className="grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 transition hover:scale-105 active:scale-95"
               >
-                {playing ? <TbPlayerPauseFilled size={22} /> : <TbPlayerPlayFilled size={22} className="ml-1" />}
+                {playing ? (
+                  <TbPlayerPauseFilled size={22} />
+                ) : (
+                  <TbPlayerPlayFilled size={22} className="ml-1" />
+                )}
               </button>
               <Btn onClick={next} label="Next">
                 <TbPlayerSkipForwardFilled size={18} />
               </Btn>
-              <Btn onClick={() => setRepeat(!repeat)} active={repeat} label="Repeat">
+              <Btn
+                onClick={() => setRepeat(!repeat)}
+                active={repeat}
+                label="Repeat"
+              >
                 <TbRepeat size={18} />
               </Btn>
             </div>
@@ -524,7 +612,9 @@ function FullView({
                 aria-label="Volume"
               />
             </span>
-            <p className="mt-4 hidden text-[11px] text-white/50 sm:block">Space to play or pause · Esc to close</p>
+            <p className="mt-4 hidden text-[11px] text-white/50 sm:block">
+              Space to play or pause · Esc to close
+            </p>
           </div>
         </div>
       </div>

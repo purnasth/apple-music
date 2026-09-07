@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   TbArrowsShuffle,
   TbChevronDown,
@@ -16,8 +16,8 @@ import {
   TbTrash,
   TbUpload,
   TbX,
-} from 'react-icons/tb';
-import Player from '@/components/Player';
+} from "react-icons/tb";
+import Player from "@/components/Player";
 import {
   Track,
   Playlists,
@@ -31,30 +31,37 @@ import {
   fmtTime,
   shuffled,
   artistsOf,
-} from '@/lib/music';
+} from "@/lib/music";
 
-type Tab = 'search' | 'library' | 'playlists';
+type Tab = "search" | "library" | "playlists";
 
 const TABS = [
-  { id: 'search', label: 'Search', Icon: TbSearch },
-  { id: 'library', label: 'Library', Icon: TbLibrary },
-  { id: 'playlists', label: 'Playlists', Icon: TbPlaylist },
-] as const satisfies readonly { id: Tab; label: string; Icon: typeof TbSearch }[];
+  { id: "search", label: "Search", Icon: TbSearch },
+  { id: "library", label: "Library", Icon: TbLibrary },
+  { id: "playlists", label: "Playlists", Icon: TbPlaylist },
+] as const satisfies readonly {
+  id: Tab;
+  label: string;
+  Icon: typeof TbSearch;
+}[];
 
-type SortKey = 'artist' | 'title' | 'album' | 'longest' | 'shortest';
+type SortKey = "artist" | "title" | "album" | "longest" | "shortest";
 
 const SORTS: Record<SortKey, (a: Track, b: Track) => number> = {
-  artist: (a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title),
+  artist: (a, b) =>
+    a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title),
   title: (a, b) => a.title.localeCompare(b.title),
-  album: (a, b) => (a.album || '~').localeCompare(b.album || '~') || a.title.localeCompare(b.title),
+  album: (a, b) =>
+    (a.album || "~").localeCompare(b.album || "~") ||
+    a.title.localeCompare(b.title),
   longest: (a, b) => (b.duration ?? 0) - (a.duration ?? 0),
   shortest: (a, b) => (a.duration ?? 0) - (b.duration ?? 0),
 };
 
 export default function Home() {
-  const [tab, setTab] = useState<Tab>('search');
+  const [tab, setTab] = useState<Tab>("search");
 
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -62,12 +69,12 @@ export default function Home() {
   const [library, setLibrary] = useState<Track[]>([]);
   const [importing, setImporting] = useState<string | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
-  const [artist, setArtist] = useState<string>('');
+  const [artist, setArtist] = useState<string>("");
   const [artistOpen, setArtistOpen] = useState(false);
-  const [artistQuery, setArtistQuery] = useState('');
+  const [artistQuery, setArtistQuery] = useState("");
   const artistBox = useRef<HTMLDivElement>(null);
-  const [filter, setFilter] = useState('');
-  const [sort, setSort] = useState<SortKey>('artist');
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<SortKey>("artist");
 
   const [playlists, setPlaylists] = useState<Playlists>({});
   const [active, setActive] = useState<string | null>(null);
@@ -91,8 +98,8 @@ export default function Home() {
   // under the bar (HIG — Layout > Visual hierarchy).
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 4);
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   // Debounced search; the in-flight request is aborted when the query moves on.
@@ -109,7 +116,8 @@ export default function Home() {
       search(query, ctrl.signal)
         .then(setResults)
         .catch((e) => {
-          if (e.name !== 'AbortError') setSearchError('Search failed. Check your connection.');
+          if (e.name !== "AbortError")
+            setSearchError("Search failed. Check your connection.");
         })
         .finally(() => setSearching(false));
     }, 350);
@@ -126,7 +134,7 @@ export default function Home() {
   };
 
   // A folder change can strand an artist selection that folder has no tracks for.
-  useEffect(() => setArtist(''), [folder]);
+  useEffect(() => setArtist(""), [folder]);
 
   // Dismiss the artist popup on an outside click or Escape, the way a menu should behave.
   useEffect(() => {
@@ -134,12 +142,13 @@ export default function Home() {
     const onDown = (e: MouseEvent) => {
       if (!artistBox.current?.contains(e.target as Node)) setArtistOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setArtistOpen(false);
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && setArtistOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
     };
   }, [artistOpen]);
 
@@ -150,11 +159,18 @@ export default function Home() {
 
   const addTo = (name: string, track: Track) => {
     if (playlists[name]?.some((t) => t.id === track.id)) return;
-    updatePlaylists({ ...playlists, [name]: [...(playlists[name] ?? []), track] });
+    updatePlaylists({
+      ...playlists,
+      [name]: [...(playlists[name] ?? []), track],
+    });
   };
 
   const onFiles = useCallback(async (files: File[]) => {
-    const audio = files.filter((f) => f.type.startsWith('audio/') || /\.(mp3|m4a|flac|wav|ogg|opus|aac)$/i.test(f.name));
+    const audio = files.filter(
+      (f) =>
+        f.type.startsWith("audio/") ||
+        /\.(mp3|m4a|flac|wav|ogg|opus|aac)$/i.test(f.name),
+    );
     if (!audio.length) return;
     setImporting(`0 / ${audio.length}`);
     try {
@@ -165,7 +181,13 @@ export default function Home() {
     }
   }, []);
 
-  const folders = [...new Set(library.map((t) => t.folder).filter(Boolean as unknown as (f?: string) => f is string))].sort();
+  const folders = [
+    ...new Set(
+      library
+        .map((t) => t.folder)
+        .filter(Boolean as unknown as (f?: string) => f is string),
+    ),
+  ].sort();
 
   const inFolder = library.filter((t) => !folder || t.folder === folder);
 
@@ -175,7 +197,8 @@ export default function Home() {
     const byKey = new Map<string, Map<string, number>>();
     for (const t of inFolder) {
       for (const name of artistsOf(t.artist)) {
-        const variants = byKey.get(name.toLowerCase()) ?? new Map<string, number>();
+        const variants =
+          byKey.get(name.toLowerCase()) ?? new Map<string, number>();
         variants.set(name, (variants.get(name) ?? 0) + 1);
         byKey.set(name.toLowerCase(), variants);
       }
@@ -186,30 +209,51 @@ export default function Home() {
         // stylised name (LANY, MGMT) beats a lowercased stray rather than losing a coin flip.
         const caps = (v: string) => (v.match(/[A-Z]/g) ?? []).length;
         const ranked = [...variants.entries()].sort(
-          (a, b) => b[1] - a[1] || caps(b[0]) - caps(a[0]) || a[0].localeCompare(b[0])
+          (a, b) =>
+            b[1] - a[1] || caps(b[0]) - caps(a[0]) || a[0].localeCompare(b[0]),
         );
-        return { name: ranked[0][0], count: ranked.reduce((n, [, c]) => n + c, 0) };
+        return {
+          name: ranked[0][0],
+          count: ranked.reduce((n, [, c]) => n + c, 0),
+        };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   })();
 
   const aq = artistQuery.trim().toLowerCase();
-  const artistMatches = aq ? artists.filter((a) => a.name.toLowerCase().includes(aq)) : artists;
+  const artistMatches = aq
+    ? artists.filter((a) => a.name.toLowerCase().includes(aq))
+    : artists;
 
   const needle = filter.trim().toLowerCase();
   const artistNeedle = artist.trim().toLowerCase();
   const inLibrary = inFolder
-    .filter((t) => !artistNeedle || artistsOf(t.artist).some((a) => a.toLowerCase() === artistNeedle))
-    .filter((t) => !needle || `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(needle))
+    .filter(
+      (t) =>
+        !artistNeedle ||
+        artistsOf(t.artist).some((a) => a.toLowerCase() === artistNeedle),
+    )
+    .filter(
+      (t) =>
+        !needle ||
+        `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(needle),
+    )
     .sort(SORTS[sort]);
 
-  const shown = tab === 'search' ? results : tab === 'library' ? inLibrary : active ? playlists[active] ?? [] : [];
+  const shown =
+    tab === "search"
+      ? results
+      : tab === "library"
+        ? inLibrary
+        : active
+          ? (playlists[active] ?? [])
+          : [];
 
   return (
     <div className="min-h-dvh bg-canvas pb-32 text-label sm:pb-24">
       <header
         className={`glass sticky top-0 z-30 border-b transition-colors ${
-          scrolled ? 'border-separator' : 'border-transparent'
+          scrolled ? "border-separator" : "border-transparent"
         }`}
       >
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
@@ -227,12 +271,14 @@ export default function Home() {
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
-                setTab('search');
+                setTab("search");
               }}
               placeholder="Songs, artists, albums…"
               className="h-9 w-full rounded-control bg-fill pl-9 pr-9 text-sm outline-none transition placeholder:text-label-3 focus:bg-fill-2"
             />
-            {!!query && <ClearButton label="Clear search" onClick={() => setQuery('')} />}
+            {!!query && (
+              <ClearButton label="Clear search" onClick={() => setQuery("")} />
+            )}
           </div>
 
           {/* A segmented control on desktop; below sm the tab bar at the foot of the
@@ -242,13 +288,17 @@ export default function Home() {
               <button
                 key={id}
                 onClick={() => setTab(id)}
-                aria-current={tab === id ? 'page' : undefined}
+                aria-current={tab === id ? "page" : undefined}
                 className={`rounded-[7px] px-2.5 py-1 text-xs font-medium transition ${
-                  tab === id ? 'bg-elevated-2 text-label shadow-sm' : 'text-label-2 hover:text-label'
+                  tab === id
+                    ? "bg-elevated-2 text-label shadow-sm"
+                    : "text-label-2 hover:text-label"
                 }`}
               >
                 {label}
-                {id === 'library' && library.length ? ` (${library.length})` : ''}
+                {id === "library" && library.length
+                  ? ` (${library.length})`
+                  : ""}
               </button>
             ))}
           </nav>
@@ -256,23 +306,29 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-5">
-        {tab === 'library' && (
+        {tab === "library" && (
           <DropZone onFiles={onFiles} importing={importing} />
         )}
 
-        {tab === 'library' && !!library.length && (
+        {tab === "library" && !!library.length && (
           <div className="mb-4 space-y-3">
             {folders.length > 1 && (
               <div className="flex flex-wrap gap-2">
                 {[null, ...folders].map((f) => (
                   <button
-                    key={f ?? '__all'}
+                    key={f ?? "__all"}
                     onClick={() => setFolder(f)}
                     className={`h-7 rounded-full px-3 text-xs font-medium transition ${
-                      folder === f ? 'bg-label text-canvas' : 'bg-fill text-label-2 hover:bg-fill-2 hover:text-label'
+                      folder === f
+                        ? "bg-label text-canvas"
+                        : "bg-fill text-label-2 hover:bg-fill-2 hover:text-label"
                     }`}
                   >
-                    {f ?? 'All'} ({f ? library.filter((t) => t.folder === f).length : library.length})
+                    {f ?? "All"} (
+                    {f
+                      ? library.filter((t) => t.folder === f).length
+                      : library.length}
+                    )
                   </button>
                 ))}
               </div>
@@ -291,7 +347,12 @@ export default function Home() {
                   aria-label="Filter library"
                   className="h-9 w-full rounded-control bg-fill pl-9 pr-9 text-xs outline-none transition placeholder:text-label-3 focus:bg-fill-2"
                 />
-                {!!filter && <ClearButton label="Clear filter" onClick={() => setFilter('')} />}
+                {!!filter && (
+                  <ClearButton
+                    label="Clear filter"
+                    onClick={() => setFilter("")}
+                  />
+                )}
               </div>
 
               {/* Hand-rolled rather than a <select> or <datalist>: 95 artists render as an
@@ -299,15 +360,21 @@ export default function Home() {
               <div ref={artistBox} className="relative w-full sm:w-auto">
                 <button
                   onClick={() => setArtistOpen(!artistOpen)}
-                  title={artist || 'Filter by artist'}
+                  title={artist || "Filter by artist"}
                   aria-expanded={artistOpen}
                   aria-haspopup="listbox"
                   className={`flex h-9 w-full items-center justify-between gap-2 rounded-control px-3 text-xs transition sm:w-44 ${
-                    artist ? 'bg-label font-medium text-canvas' : 'bg-fill text-label-2 hover:bg-fill-2 hover:text-label'
+                    artist
+                      ? "bg-label font-medium text-canvas"
+                      : "bg-fill text-label-2 hover:bg-fill-2 hover:text-label"
                   }`}
                 >
-                  <span className="truncate">{artist || `All artists (${artists.length})`}</span>
-                  <TbChevronDown className={`shrink-0 opacity-60 transition ${artistOpen ? 'rotate-180' : ''}`} />
+                  <span className="truncate">
+                    {artist || `All artists (${artists.length})`}
+                  </span>
+                  <TbChevronDown
+                    className={`shrink-0 opacity-60 transition ${artistOpen ? "rotate-180" : ""}`}
+                  />
                 </button>
 
                 {artistOpen && (
@@ -326,20 +393,25 @@ export default function Home() {
                         className="h-10 w-full bg-transparent pl-9 pr-3 text-xs outline-none placeholder:text-label-3"
                       />
                     </div>
-                    <ul role="listbox" className="max-h-[50vh] overflow-y-auto overscroll-contain py-1 sm:max-h-72">
+                    <ul
+                      role="listbox"
+                      className="max-h-[50vh] overflow-y-auto overscroll-contain py-1 sm:max-h-72"
+                    >
                       <li>
                         <button
                           onClick={() => {
-                            setArtist('');
+                            setArtist("");
                             setArtistOpen(false);
-                            setArtistQuery('');
+                            setArtistQuery("");
                           }}
                           className={`flex w-full items-center justify-between gap-3 px-4 py-1.5 text-left text-xs transition hover:bg-fill ${
-                            artist ? 'text-label-2' : 'font-semibold text-label'
+                            artist ? "text-label-2" : "font-semibold text-label"
                           }`}
                         >
                           All artists
-                          <span className="text-[11px] tabular-nums text-label-3">{artists.length}</span>
+                          <span className="text-[11px] tabular-nums text-label-3">
+                            {artists.length}
+                          </span>
                         </button>
                       </li>
                       {artistMatches.map((a) => (
@@ -350,19 +422,25 @@ export default function Home() {
                             onClick={() => {
                               setArtist(a.name);
                               setArtistOpen(false);
-                              setArtistQuery('');
+                              setArtistQuery("");
                             }}
                             className={`flex w-full items-center justify-between gap-3 px-4 py-1.5 text-left text-xs transition hover:bg-fill ${
-                              a.name === artist ? 'font-semibold text-label' : 'text-label-2'
+                              a.name === artist
+                                ? "font-semibold text-label"
+                                : "text-label-2"
                             }`}
                           >
                             <span className="truncate">{a.name}</span>
-                            <span className="shrink-0 text-[11px] tabular-nums text-label-3">{a.count}</span>
+                            <span className="shrink-0 text-[11px] tabular-nums text-label-3">
+                              {a.count}
+                            </span>
                           </button>
                         </li>
                       ))}
                       {!artistMatches.length && (
-                        <li className="px-4 py-4 text-center text-xs text-label-2">No artist matches.</li>
+                        <li className="px-4 py-4 text-center text-xs text-label-2">
+                          No artist matches.
+                        </li>
                       )}
                     </ul>
                   </div>
@@ -409,8 +487,8 @@ export default function Home() {
                 {(needle || artist) && (
                   <button
                     onClick={() => {
-                      setFilter('');
-                      setArtist('');
+                      setFilter("");
+                      setArtist("");
                     }}
                     className="ml-2 font-medium text-accent underline-offset-2 hover:underline"
                   >
@@ -422,7 +500,7 @@ export default function Home() {
           </div>
         )}
 
-        {tab === 'playlists' && (
+        {tab === "playlists" && (
           <PlaylistBar
             playlists={playlists}
             active={active}
@@ -436,10 +514,10 @@ export default function Home() {
           />
         )}
 
-        {tab === 'search' && searching && (
+        {tab === "search" && searching && (
           <p className="py-8 text-center text-sm text-label-2">Searching…</p>
         )}
-        {tab === 'search' && searchError && (
+        {tab === "search" && searchError && (
           <p className="py-8 text-center text-sm text-accent">{searchError}</p>
         )}
 
@@ -447,17 +525,17 @@ export default function Home() {
           <div className="flex flex-col items-center gap-2.5 py-16 text-center">
             <TbMusic className="text-label-3" size={32} />
             <p className="max-w-xs text-sm text-label-2">
-              {tab === 'search'
+              {tab === "search"
                 ? query
-                  ? 'No results.'
-                  : 'Search the Apple Music catalogue to preview tracks.'
-                : tab === 'library'
+                  ? "No results."
+                  : "Search the Apple Music catalogue to preview tracks."
+                : tab === "library"
                   ? library.length
-                    ? 'No tracks match those filters.'
-                    : 'Your library is empty. Add audio files above.'
+                    ? "No tracks match those filters."
+                    : "Your library is empty. Add audio files above."
                   : active
-                    ? 'This playlist is empty. Add tracks from search or your library.'
-                    : 'Create a playlist to get started.'}
+                    ? "This playlist is empty. Add tracks from search or your library."
+                    : "Create a playlist to get started."}
             </p>
           </div>
         )}
@@ -476,21 +554,23 @@ export default function Home() {
               playlistNames={Object.keys(playlists)}
               onAdd={(name) => addTo(name, track)}
               onNewPlaylist={() => {
-                const name = window.prompt('Playlist name')?.trim();
+                const name = window.prompt("Playlist name")?.trim();
                 if (name) updatePlaylists({ ...playlists, [name]: [track] });
               }}
               onRemove={
                 // Bundled tracks ship with the site; removeTrack can't evict one, it would just reappear.
-                tab === 'library' && !track.id.startsWith('file:')
+                tab === "library" && !track.id.startsWith("file:")
                   ? async () => {
                       await removeTrack(track.id);
                       setLibrary(await getLibrary());
                     }
-                  : tab === 'playlists' && active
+                  : tab === "playlists" && active
                     ? () =>
                         updatePlaylists({
                           ...playlists,
-                          [active]: playlists[active].filter((t) => t.id !== track.id),
+                          [active]: playlists[active].filter(
+                            (t) => t.id !== track.id,
+                          ),
                         })
                     : undefined
               }
@@ -499,7 +579,13 @@ export default function Home() {
         </ul>
       </main>
 
-      <Player queue={queue} index={qIndex} setIndex={setQIndex} playing={playing} setPlaying={setPlaying} />
+      <Player
+        queue={queue}
+        index={qIndex}
+        setIndex={setQIndex}
+        playing={playing}
+        setPlaying={setPlaying}
+      />
 
       {/* Primary navigation lives at the foot of the screen on a phone, where a thumb
           reaches it, and the mini player stacks directly above it (HIG — Layout). */}
@@ -509,13 +595,15 @@ export default function Home() {
             <button
               key={id}
               onClick={() => setTab(id)}
-              aria-current={tab === id ? 'page' : undefined}
+              aria-current={tab === id ? "page" : undefined}
               className={`flex h-14 flex-1 flex-col items-center justify-center gap-1 transition ${
-                tab === id ? 'text-accent' : 'text-label-2'
+                tab === id ? "text-accent" : "text-label-2"
               }`}
             >
               <Icon size={19} />
-              <span className="text-[10px] font-medium tracking-tight">{label}</span>
+              <span className="text-[10px] font-medium tracking-tight">
+                {label}
+              </span>
             </button>
           ))}
         </div>
@@ -525,7 +613,13 @@ export default function Home() {
 }
 
 /** The trailing clear affordance a search field grows once it has a value. */
-function ClearButton({ label, onClick }: { label: string; onClick: () => void }) {
+function ClearButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
       onClick={onClick}
@@ -558,11 +652,15 @@ function Row({
   onRemove?: () => void;
 }) {
   return (
-    <li className="group relative flex items-center gap-3 rounded-control px-2 py-1 transition hover:bg-fill">
+    <li className="group relative flex items-center gap-3 rounded-control px-1 py-1 transition hover:bg-fill">
       {/* The separator is inset past the artwork, the way a system list draws it. */}
       <span className="pointer-events-none absolute bottom-0 left-16 right-2 h-px bg-separator group-last:hidden" />
 
-      <button onClick={onPlay} aria-label={playing ? 'Pause' : 'Play'} className="relative shrink-0">
+      <button
+        onClick={onPlay}
+        aria-label={playing ? "Pause" : "Play"}
+        className="relative shrink-0"
+      >
         {track.artwork ? (
           <img
             src={track.artwork}
@@ -576,24 +674,36 @@ function Row({
         )}
         <span
           className={`absolute inset-0 grid place-items-center rounded-[7px] bg-black/55 text-white transition ${
-            active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            active ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           }`}
         >
-          {playing ? <TbPlayerPauseFilled size={15} /> : <TbPlayerPlayFilled size={15} />}
+          {playing ? (
+            <TbPlayerPauseFilled size={15} />
+          ) : (
+            <TbPlayerPlayFilled size={15} />
+          )}
         </span>
       </button>
 
-      <button onClick={onPlay} title={`${track.title} — ${track.artist}`} className="min-w-0 flex-1 py-1 text-left">
-        <div className={`truncate text-sm ${active ? 'font-semibold text-accent' : 'font-medium text-label'}`}>
+      <button
+        onClick={onPlay}
+        title={`${track.title} — ${track.artist}`}
+        className="min-w-0 flex-1 py-1 text-left space-y-0.5"
+      >
+        <div
+          className={`truncate text-sm ${active ? "font-semibold text-accent" : "font-medium text-label"}`}
+        >
           {track.title}
         </div>
-        <div className="truncate text-xs text-label-2">
+        <div className="truncate text-[11px] text-label-2">
           {track.artist}
-          {track.album ? ` — ${track.album}` : ''}
+          {track.album ? ` — ${track.album}` : ""}
         </div>
       </button>
 
-      <span className="hidden text-xs tabular-nums text-label-3 sm:block">{fmtTime(track.duration)}</span>
+      <span className="hidden text-xs tabular-nums text-label-3 sm:block">
+        {fmtTime(track.duration)}
+      </span>
 
       {isPreview(track) && (
         <span className="hidden rounded-full bg-fill px-2 py-0.5 text-[10px] font-medium text-label-2 md:block">
@@ -607,9 +717,9 @@ function Row({
           value=""
           onChange={(e) => {
             const v = e.target.value;
-            if (v === '__new') onNewPlaylist();
+            if (v === "__new") onNewPlaylist();
             else if (v) onAdd(v);
-            e.target.value = '';
+            e.target.value = "";
           }}
           aria-label="Add to playlist"
           title="Add to playlist"
@@ -651,7 +761,13 @@ function Row({
   );
 }
 
-function DropZone({ onFiles, importing }: { onFiles: (f: File[]) => void; importing: string | null }) {
+function DropZone({
+  onFiles,
+  importing,
+}: {
+  onFiles: (f: File[]) => void;
+  importing: string | null;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
@@ -670,7 +786,9 @@ function DropZone({ onFiles, importing }: { onFiles: (f: File[]) => void; import
       }}
       onClick={() => input.current?.click()}
       className={`mb-5 cursor-pointer rounded-card border border-dashed p-6 text-center text-xs transition ${
-        over ? 'border-accent bg-accent/10 text-label' : 'border-separator text-label-2 hover:border-label-3 hover:bg-fill'
+        over
+          ? "border-accent bg-accent/10 text-label"
+          : "border-separator text-label-2 hover:border-label-3 hover:bg-fill"
       }`}
     >
       <input
@@ -681,7 +799,7 @@ function DropZone({ onFiles, importing }: { onFiles: (f: File[]) => void; import
         hidden
         onChange={(e) => {
           onFiles(Array.from(e.target.files ?? []));
-          e.target.value = '';
+          e.target.value = "";
         }}
       />
       <input
@@ -691,10 +809,10 @@ function DropZone({ onFiles, importing }: { onFiles: (f: File[]) => void; import
         hidden
         // webkitdirectory is missing from React's typings; it picks a folder and recurses
         // into every subfolder, which a plain `multiple` input cannot do.
-        {...({ webkitdirectory: '' } as Record<string, string>)}
+        {...({ webkitdirectory: "" } as Record<string, string>)}
         onChange={(e) => {
           onFiles(Array.from(e.target.files ?? []));
-          e.target.value = '';
+          e.target.value = "";
         }}
       />
       {importing ? (
@@ -733,7 +851,7 @@ function PlaylistBar({
   onCreate: (name: string) => void;
   onDelete: (name: string) => void;
 }) {
-  const [name, setName] = useState('');
+  const [name, setName] = useState("");
   const names = Object.keys(playlists);
 
   return (
@@ -746,7 +864,7 @@ function PlaylistBar({
             onCreate(n);
             setActive(n);
           }
-          setName('');
+          setName("");
         }}
         className="flex gap-2"
       >
@@ -767,7 +885,9 @@ function PlaylistBar({
           <span
             key={n}
             className={`flex h-8 items-center gap-1 rounded-full pl-3 pr-1 text-xs font-medium transition ${
-              active === n ? 'bg-accent text-white' : 'bg-fill text-label-2 hover:bg-fill-2 hover:text-label'
+              active === n
+                ? "bg-accent text-white"
+                : "bg-fill text-label-2 hover:bg-fill-2 hover:text-label"
             }`}
           >
             <button onClick={() => setActive(n)} className="py-2">
