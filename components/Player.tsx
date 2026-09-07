@@ -5,12 +5,12 @@ import {
   TbArrowsMaximize,
   TbArrowsShuffle,
   TbChevronLeft,
-  TbChevronRight,
   TbMusic,
   TbPlayerPauseFilled,
   TbPlayerPlayFilled,
   TbPlayerSkipBackFilled,
   TbPlayerSkipForwardFilled,
+  TbPlaylist,
   TbRepeat,
   TbVolume,
   TbX,
@@ -430,8 +430,8 @@ function FullView({
         <aside
           // Off-screen, it is out of the tab order and out of the accessibility tree.
           inert={!showQueue}
-          className={`absolute inset-y-0 left-0 z-20 flex w-[min(20rem,85vw)] shrink-0 flex-col border-r border-white/10 bg-black/55 backdrop-blur-2xl transition-[transform,margin] duration-300 ease-out lg:relative lg:z-10 lg:bg-black/30 ${
-            showQueue ? "" : "-translate-x-full lg:translate-x-0 lg:-ml-80"
+          className={`absolute inset-y-0 left-0 z-20 flex w-[min(20rem,85vw)] shrink-0 flex-col border-r border-white/10 bg-black/55 backdrop-blur-2xl transition-transform duration-300 ease-out lg:bg-black/30 ${
+            showQueue ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           <h3 className="px-5 pb-3 pt-6 text-xs font-semibold uppercase text-white/60 tracking-widest">
@@ -503,20 +503,20 @@ function FullView({
           aria-label={showQueue ? "Hide queue" : "Show queue"}
           aria-expanded={showQueue}
           title={showQueue ? "Hide queue" : "Show queue"}
-          className={`absolute left-0 top-5 z-30 flex h-14 w-7 items-center justify-center rounded-full border border-white/10 bg-white/10 backdrop-blur-xl transition-[transform,background-color] duration-300 ease-out hover:bg-white/25 ${
+          className={`absolute left-0 top-5 z-30 grid h-8 w-8 place-items-center rounded-full bg-white/15 backdrop-blur-xl transition-transform duration-300 ease-out hover:bg-white/25 ${
             showQueue
               ? "translate-x-[calc(min(20rem,85vw)-50%)]"
               : "translate-x-5"
           }`}
         >
-          {showQueue ? (
-            <TbChevronLeft size={15} />
-          ) : (
-            <TbChevronRight size={15} />
-          )}
+          {showQueue ? <TbChevronLeft size={16} /> : <TbPlaylist size={16} />}
         </button>
 
-        <div className="flex min-w-0 flex-1 flex-col items-center overflow-y-auto px-4 py-16 sm:px-6">
+        <div
+          className={`flex min-w-0 flex-1 flex-col items-center overflow-y-auto px-4 py-16 transition-transform duration-300 ease-out sm:px-6 ${
+            showQueue ? "lg:translate-x-40" : "translate-x-0"
+          }`}
+        >
           <div className="my-auto flex w-full max-w-lg flex-col items-center">
             {art ? (
               <img
