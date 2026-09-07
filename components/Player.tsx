@@ -221,7 +221,9 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
         </button>
 
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{track.title}</div>
+          <div className="truncate text-sm font-medium" title={track.title}>
+            {track.title}
+          </div>
           <div className="truncate text-xs text-label-2">
             {track.artist}
             {isPreview(track) ? ' · 30s preview' : ''}
@@ -256,6 +258,7 @@ export default function Player({ queue, index, setIndex, playing, setPlaying }: 
           <button
             onClick={() => setPlaying(!playing)}
             aria-label={playing ? 'Pause' : 'Play'}
+            title={playing ? 'Pause' : 'Play'}
             className="grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
           >
             {playing ? <TbPlayerPauseFilled size={18} /> : <TbPlayerPlayFilled size={18} className="ml-0.5" />}
@@ -303,6 +306,7 @@ function Btn({
     <button
       onClick={onClick}
       aria-label={label}
+      title={label}
       aria-pressed={active}
       className={`grid h-8 w-8 place-items-center rounded-full text-sm transition hover:bg-fill active:scale-95 ${
         active ? 'text-accent' : 'text-label-2 hover:text-label'
@@ -400,7 +404,7 @@ function FullView({
           <h3 className="px-5 pb-3 pt-20 text-xs font-semibold uppercase tracking-wider text-white/60">
             Playing next · {queue.length}
           </h3>
-          <ol className="min-h-0 flex-1 overflow-y-auto pb-6">
+          <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
             {queue.map((t, i) => {
               const current = i === index;
               return (
@@ -408,6 +412,7 @@ function FullView({
                   <button
                     onClick={() => setIndex(i)}
                     aria-current={current}
+                    title={`${t.title} — ${t.artist}`}
                     className={`flex w-full items-center gap-3 px-5 py-2 text-left transition hover:bg-white/10 ${
                       current ? 'bg-white/15' : i < index ? 'opacity-50' : ''
                     }`}
@@ -493,6 +498,7 @@ function FullView({
               <button
                 onClick={() => setPlaying(!playing)}
                 aria-label={playing ? 'Pause' : 'Play'}
+                title={playing ? 'Pause' : 'Play'}
                 className="grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 transition hover:scale-105 active:scale-95"
               >
                 {playing ? <TbPlayerPauseFilled size={22} /> : <TbPlayerPlayFilled size={22} className="ml-1" />}

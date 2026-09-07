@@ -86,9 +86,38 @@ body {
   }
 }
 
-/* Keep the seek/volume thumbs visible on the dark player bar. */
-input[type="range"] {
+/* Browsers give <a> a pointer and <button> an arrow, so a page of icon buttons
+   reads as inert. Every control that responds to a click says so. */
+button,
+select,
+summary,
+label[for],
+[role="button"],
+[role="option"],
+input[type="range"],
+input[type="file"],
+input[type="checkbox"],
+input[type="radio"] {
   cursor: pointer;
+}
+
+button:disabled,
+select:disabled,
+input:disabled {
+  cursor: not-allowed;
+}
+
+/* Chrome is not content: dragging across a button label should not select it,
+   and iOS should not flash a grey box over every tap. */
+button,
+nav,
+[role="button"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* iOS Safari zooms the page in — and never zooms back out — when a focused form

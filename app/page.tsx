@@ -83,6 +83,10 @@ export default function Home() {
     setPlaylists(getPlaylists());
   }, []);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [tab]);
+
   // The scroll edge effect: no separator at rest, a hairline once content slides
   // under the bar (HIG — Layout > Visual hierarchy).
   useEffect(() => {
@@ -226,8 +230,9 @@ export default function Home() {
                 setTab('search');
               }}
               placeholder="Songs, artists, albums…"
-              className="h-9 w-full rounded-control bg-fill pl-9 pr-3 text-sm outline-none transition placeholder:text-label-3 focus:bg-fill-2"
+              className="h-9 w-full rounded-control bg-fill pl-9 pr-9 text-sm outline-none transition placeholder:text-label-3 focus:bg-fill-2"
             />
+            {!!query && <ClearButton label="Clear search" onClick={() => setQuery('')} />}
           </div>
 
           {/* A segmented control on desktop; below sm the tab bar at the foot of the
@@ -284,8 +289,9 @@ export default function Home() {
                   onChange={(e) => setFilter(e.target.value)}
                   placeholder="Filter title, artist, album…"
                   aria-label="Filter library"
-                  className="h-9 w-full rounded-control bg-fill pl-9 pr-3 text-xs outline-none transition placeholder:text-label-3 focus:bg-fill-2"
+                  className="h-9 w-full rounded-control bg-fill pl-9 pr-9 text-xs outline-none transition placeholder:text-label-3 focus:bg-fill-2"
                 />
+                {!!filter && <ClearButton label="Clear filter" onClick={() => setFilter('')} />}
               </div>
 
               {/* Hand-rolled rather than a <select> or <datalist>: 95 artists render as an
@@ -293,6 +299,7 @@ export default function Home() {
               <div ref={artistBox} className="relative w-full sm:w-auto">
                 <button
                   onClick={() => setArtistOpen(!artistOpen)}
+                  title={artist || 'Filter by artist'}
                   aria-expanded={artistOpen}
                   aria-haspopup="listbox"
                   className={`flex h-9 w-full items-center justify-between gap-2 rounded-control px-3 text-xs transition sm:w-44 ${
@@ -319,7 +326,7 @@ export default function Home() {
                         className="h-10 w-full bg-transparent pl-9 pr-3 text-xs outline-none placeholder:text-label-3"
                       />
                     </div>
-                    <ul role="listbox" className="max-h-[50vh] overflow-y-auto py-1 sm:max-h-72">
+                    <ul role="listbox" className="max-h-[50vh] overflow-y-auto overscroll-contain py-1 sm:max-h-72">
                       <li>
                         <button
                           onClick={() => {
@@ -378,6 +385,7 @@ export default function Home() {
               <button
                 onClick={() => inLibrary.length && play(inLibrary, 0)}
                 disabled={!inLibrary.length}
+                title="Play these in order"
                 className="flex h-9 items-center gap-1.5 rounded-control bg-accent px-4 text-xs font-semibold text-white transition hover:brightness-110 active:scale-[0.97] disabled:opacity-40"
               >
                 <TbPlayerPlayFilled size={12} />
@@ -444,7 +452,9 @@ export default function Home() {
                   ? 'No results.'
                   : 'Search the Apple Music catalogue to preview tracks.'
                 : tab === 'library'
-                  ? 'Your library is empty. Add audio files above.'
+                  ? library.length
+                    ? 'No tracks match those filters.'
+                    : 'Your library is empty. Add audio files above.'
                   : active
                     ? 'This playlist is empty. Add tracks from search or your library.'
                     : 'Create a playlist to get started.'}
@@ -514,6 +524,20 @@ export default function Home() {
   );
 }
 
+/** The trailing clear affordance a search field grows once it has a value. */
+function ClearButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="absolute right-2 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full bg-fill-2 text-label-2 transition hover:text-label"
+    >
+      <TbX size={11} />
+    </button>
+  );
+}
+
 function Row({
   track,
   active,
@@ -550,12 +574,16 @@ function Row({
             <TbMusic size={18} />
           </div>
         )}
-        <span className="absolute inset-0 grid place-items-center rounded-[7px] bg-black/55 text-white opacity-0 transition group-hover:opacity-100">
+        <span
+          className={`absolute inset-0 grid place-items-center rounded-[7px] bg-black/55 text-white transition ${
+            active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}
+        >
           {playing ? <TbPlayerPauseFilled size={15} /> : <TbPlayerPlayFilled size={15} />}
         </span>
       </button>
 
-      <button onClick={onPlay} className="min-w-0 flex-1 py-1 text-left">
+      <button onClick={onPlay} title={`${track.title} — ${track.artist}`} className="min-w-0 flex-1 py-1 text-left">
         <div className={`truncate text-sm ${active ? 'font-semibold text-accent' : 'font-medium text-label'}`}>
           {track.title}
         </div>
@@ -584,7 +612,8 @@ function Row({
             e.target.value = '';
           }}
           aria-label="Add to playlist"
-          className="absolute inset-0 cursor-pointer appearance-none rounded bg-transparent text-transparent opacity-0"
+          title="Add to playlist"
+          className="absolute inset-0 appearance-none rounded bg-transparent text-transparent opacity-0"
         >
           <option value="">Add to playlist…</option>
           {playlistNames.map((n) => (
