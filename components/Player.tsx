@@ -427,90 +427,94 @@ function FullView({
       </button>
 
       <div className="relative z-10 flex h-full">
-        <div
-          className={`absolute inset-y-0 left-0 z-20 flex w-[min(20rem,85vw)] shrink-0 transition-[transform,margin] duration-300 ease-out lg:relative lg:z-10 ${
+        <aside
+          // Off-screen, it is out of the tab order and out of the accessibility tree.
+          inert={!showQueue}
+          className={`absolute inset-y-0 left-0 z-20 flex w-[min(20rem,85vw)] shrink-0 flex-col border-r border-white/10 bg-black/55 backdrop-blur-2xl transition-[transform,margin] duration-300 ease-out lg:relative lg:z-10 lg:bg-black/30 ${
             showQueue ? "" : "-translate-x-full lg:translate-x-0 lg:-ml-80"
           }`}
         >
-          <aside
-            // Off-screen, it is out of the tab order and out of the accessibility tree.
-            inert={!showQueue}
-            className="flex min-w-0 flex-1 flex-col border-r border-white/10 bg-black/55 backdrop-blur-2xl lg:bg-black/30"
-          >
-            <h3 className="px-5 pb-3 pt-6 text-xs font-semibold uppercase text-white/60 tracking-widest">
-              Playing next · {queue.length} song{queue.length === 1 ? "" : "s"}
-            </h3>
-            <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
-              {queue.map((t, i) => {
-                const current = i === index;
-                return (
-                  <li key={`${t.id}-${i}`}>
-                    <button
-                      onClick={() => setIndex(i)}
-                      aria-current={current}
-                      title={`${t.title} — ${t.artist}`}
-                      className={`flex w-full items-center gap-2 pl-3 pr-4 py-2 text-left transition hover:bg-white/10 ${
-                        current ? "bg-white/15" : i < index ? "opacity-50" : ""
-                      }`}
-                    >
-                      <span className="grid w-4 shrink-0 place-items-center text-[10px] tabular-nums text-white/60">
-                        {current ? (
-                          playing ? (
-                            <TbPlayerPlayFilled className="text-accent" />
-                          ) : (
-                            <TbPlayerPauseFilled className="text-accent" />
-                          )
+          <h3 className="px-5 pb-3 pt-6 text-xs font-semibold uppercase text-white/60 tracking-widest">
+            Playing next · {queue.length} song{queue.length === 1 ? "" : "s"}
+          </h3>
+          <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
+            {queue.map((t, i) => {
+              const current = i === index;
+              return (
+                <li key={`${t.id}-${i}`}>
+                  <button
+                    onClick={() => setIndex(i)}
+                    aria-current={current}
+                    title={`${t.title} — ${t.artist}`}
+                    className={`flex w-full items-center gap-2 pl-3 pr-4 py-2 text-left transition hover:bg-white/10 ${
+                      current ? "bg-white/15" : i < index ? "opacity-50" : ""
+                    }`}
+                  >
+                    <span className="grid w-4 shrink-0 place-items-center text-[10px] tabular-nums text-white/60">
+                      {current ? (
+                        playing ? (
+                          <TbPlayerPlayFilled className="text-accent" />
                         ) : (
-                          i + 1
-                        )}
-                      </span>
-                      {t.artwork ? (
-                        <Image
-                          width={36}
-                          height={36}
-                          src={t.artwork}
-                          alt={`${t.album || t.title} cover`}
-                          className="shrink-0 rounded-[6px] object-cover"
-                        />
+                          <TbPlayerPauseFilled className="text-accent" />
+                        )
                       ) : (
-                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[6px] bg-white/10 text-white/50">
-                          <TbMusic size={16} />
-                        </span>
+                        i + 1
                       )}
-                      <span className="min-w-0 flex-1">
-                        <span
-                          className={`block truncate text-xs ${current ? "font-semibold" : ""}`}
-                        >
-                          {t.title}
-                        </span>
-                        <span className="block truncate text-[11px] text-white/60">
-                          {t.artist}
-                        </span>
+                    </span>
+                    {t.artwork ? (
+                      <Image
+                        width={36}
+                        height={36}
+                        src={t.artwork}
+                        alt={`${t.album || t.title} cover`}
+                        className="shrink-0 rounded-[6px] object-cover"
+                      />
+                    ) : (
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[6px] bg-white/10 text-white/50">
+                        <TbMusic size={16} />
                       </span>
-                      <span className="shrink-0 text-xxs tabular-nums text-white/50">
-                        {fmtTime(t.duration)}
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={`block truncate text-xs ${current ? "font-semibold" : ""}`}
+                      >
+                        {t.title}
                       </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </aside>
+                      <span className="block truncate text-[11px] text-white/60">
+                        {t.artist}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-xxs tabular-nums text-white/50">
+                      {fmtTime(t.duration)}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </aside>
 
-          {/* Straddles the drawer's trailing edge and travels with it, so closing
-              parks it half-off the screen instead of spending a corner on it. */}
-          <button
-            onClick={() => setShowQueue(!showQueue)}
-            aria-label={showQueue ? "Hide queue" : "Show queue"}
-            aria-expanded={showQueue}
-            title={showQueue ? "Hide queue" : "Show queue"}
-            className="group absolute right-0 top-1/2 z-30 flex h-16 w-7 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full border border-white/10 bg-white/10 backdrop-blur-xl transition hover:bg-white/20 active:scale-95"
-          >
-            <span className="transition-transform duration-300 ease-out group-hover:scale-110">
-              {showQueue ? <TbChevronLeft size={15} /> : <TbChevronRight size={15} />}
-            </span>
-          </button>
-        </div>
+        {/* Rides the drawer's trailing edge when there is one to ride — half over
+            the queue, half over the artwork — and tucks whole against the screen
+            edge when the drawer is away. calc() offsets by the drawer's width less
+            half the handle's own, which is what centres it on the seam. */}
+        <button
+          onClick={() => setShowQueue(!showQueue)}
+          aria-label={showQueue ? "Hide queue" : "Show queue"}
+          aria-expanded={showQueue}
+          title={showQueue ? "Hide queue" : "Show queue"}
+          className={`absolute left-0 top-5 z-30 flex h-14 w-7 items-center justify-center rounded-full border border-white/10 bg-white/10 backdrop-blur-xl transition-[transform,background-color] duration-300 ease-out hover:bg-white/25 ${
+            showQueue
+              ? "translate-x-[calc(min(20rem,85vw)-50%)]"
+              : "translate-x-5"
+          }`}
+        >
+          {showQueue ? (
+            <TbChevronLeft size={15} />
+          ) : (
+            <TbChevronRight size={15} />
+          )}
+        </button>
 
         <div className="flex min-w-0 flex-1 flex-col items-center overflow-y-auto px-4 py-16 sm:px-6">
           <div className="my-auto flex w-full max-w-lg flex-col items-center">
