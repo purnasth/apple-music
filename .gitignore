@@ -45,3 +45,6 @@ next-env.d.ts
 /public/songs/
 /public/songs-art/
 /public/songs.json
+
+# Local record of what is already in R2 — a cache, not a source of truth.
+/.r2-ledger.json

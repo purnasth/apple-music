@@ -9,8 +9,11 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --experimental-strip-types --test lib/*.test.ts",
-    "songs": "node scripts/build-songs.mjs",
-    "deploy": "npm run songs && npm run build && npx wrangler deploy"
+    "songs": "node scripts/check-songs.mjs && node scripts/build-songs.mjs",
+    "deploy": "npm run songs && npm run upload && npm run build && npx wrangler deploy",
+    "postbuild": "rm -rf out/songs out/songs-art out/songs.json",
+    "upload": "node scripts/upload-library.mjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json"
   },
   "dependencies": {
     "idb-keyval": "^6.3.0",
@@ -21,6 +24,7 @@
     "react-icons": "^5.7.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260908.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

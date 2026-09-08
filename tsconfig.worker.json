@@ -1,0 +1,16 @@
+// The Worker runs on workerd, not in a browser: its globals (R2Bucket, Fetcher)
+// collide with the DOM lib the Next app needs, so it type-checks on its own.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true
+  },
+  "include": ["worker/**/*.ts"]
+}

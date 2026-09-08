@@ -24,7 +24,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # LayoutProps and friends are generated into .next/types, which tsconfig
+      # includes — on a clean clone they do not exist yet and tsc fails with
+      # TS2304. `typegen` writes them without running a build, so it does not
+      # trip the prebuild song guard the way `next build` would.
+      - name: Generate route types
+        run: npx next typegen
       - name: Type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
       - name: Tests
         run: npm test
