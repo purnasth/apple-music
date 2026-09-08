@@ -26,8 +26,13 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;
   if (url.pathname.startsWith('/songs/')) return e.respondWith(serve(e));
-  // Hash-named, so immutable: covers and built JS/CSS never change under their URL.
-  if (url.pathname.startsWith('/songs-art/') || url.pathname.startsWith('/_next/static/'))
+  // Hash-named, so immutable: covers and built JS/CSS never change under their
+  // URL. But chunks are content-hashed only in production — next dev reuses
+  // names, and caching those would freeze the app mid-development.
+  if (
+    url.pathname.startsWith('/songs-art/') ||
+    (url.pathname.startsWith('/_next/static/') && location.hostname !== 'localhost')
+  )
     return e.respondWith(cacheFirst(e.request));
   // The shell and manifest change per deploy: network first, cache as offline fallback.
   if (e.request.mode === 'navigate' || url.pathname === '/songs.json')

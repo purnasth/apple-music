@@ -409,13 +409,15 @@ export default function Player({
       )}
 
       <div
-        className={`fixed inset-x-0 bottom-14 z-40 px-3 pb-3 sm:bottom-0 sm:px-4 sm:pb-4 ${
+        className={`fixed inset-x-0 bottom-14 z-40 px-4 pb-3 sm:bottom-0 sm:pb-4 ${
           full ? "hidden" : ""
         }`}
       >
         {/* A floating capsule rather than an edge-to-edge slab: the functional
-            layer sits above the content, it is not welded to the screen. */}
-        <div className="glass relative mx-auto max-w-6xl overflow-hidden rounded-sheet shadow-2xl shadow-black/50 ring-1 ring-white/10">
+            layer sits above the content, it is not welded to the screen.
+            70rem = the main column's max-w-6xl minus its px-4, so the capsule's
+            edges line up with the content above it. */}
+        <div className="glass relative mx-auto max-w-[70rem] overflow-hidden rounded-sheet shadow-2xl shadow-black/50 ring-1 ring-white/10">
           {/* Glass has no colour of its own — it takes it from what is behind.
               Nothing is behind a bar at the screen edge, so the artwork stands in
               and the capsule reads in the album's colour (HIG — Liquid Glass). */}
@@ -460,10 +462,10 @@ export default function Player({
                 aria-label="Open the full player"
                 className="block w-full min-w-0 text-left"
               >
-                <span className="block truncate text-sm font-medium">
+                <span className="block truncate text-xs font-medium sm:text-sm">
                   {track.title}
                 </span>
-                <span className="block truncate text-xs text-label-2">
+                <span className="block truncate text-[11px] text-label-2 sm:text-xs">
                   {track.artist}
                   {isPreview(track) ? " · 30s preview" : ""}
                 </span>
@@ -473,7 +475,7 @@ export default function Player({
               )}
 
               <div className="mt-1.5 flex items-center gap-2">
-                <span className="w-9 text-right text-[10px] tabular-nums text-label-3">
+                <span className="text-[10px] tabular-nums text-label-3">
                   {fmtTime(time)}
                 </span>
                 <input
@@ -487,7 +489,7 @@ export default function Player({
                   style={filled(time, seekMax, buffered)}
                   aria-label="Seek"
                 />
-                <span className="w-9 text-[10px] tabular-nums text-label-3">
+                <span className="text-[10px] tabular-nums text-label-3">
                   {fmtTime(seekMax)}
                 </span>
               </div>

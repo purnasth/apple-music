@@ -313,7 +313,8 @@ export function shuffled<T>(items: T[]): T[] {
 }
 
 export const fmtTime = (s?: number) => {
-  if (!s || !isFinite(s)) return '--:--';
+  // 0 is a real time (a track starts there) — only absent/infinite is unknown.
+  if (s == null || !isFinite(s)) return '--:--';
   const m = Math.floor(s / 60);
   return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 };
