@@ -41,9 +41,13 @@ the guard working: a red build is recoverable, a silent wipe is not. Do not
 `.github/workflows/ci.yml` covers what CI can usefully do here — type check and
 tests on every push, no build and no deploy — so pushes still get a green check.
 
-If you would rather have merges deploy on their own, the alternative is to commit
-the audio to git so CI has it: about 840 MB in history, permanently, and a slower
-clone on every build. That is the trade — automatic merges, or a small repo.
+If you would rather have merges deploy on their own, there are two routes and
+neither is free of cost. Committing the audio to git gives CI the files — about
+1.1 GB in history, permanently, and a slower clone on every build. Or move the
+library out of the asset manifest so a deploy cannot reach it: that work is done
+and parked on the `r2-library` branch, waiting only on R2 being enabled in the
+dashboard, which needs a payment method even though 1.1 GB sits inside the 10 GB
+free tier. Until then the switch above is the whole answer.
 
 ## Where things live
 
