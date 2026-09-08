@@ -201,6 +201,46 @@ export async function audioSrc(track: Track, signal?: AbortSignal): Promise<stri
   return fresh.preview ?? track.preview;
 }
 
+/* ---------- Session: resume where the listener left off ---------- */
+
+const SS_KEY = 'session';
+const SS_TIME_KEY = 'session-time';
+
+export type Session = {
+  queue: Track[];
+  index: number;
+  volume: number;
+  muted: boolean;
+  shuffle: boolean;
+  repeat: boolean;
+  /** Position in the track at `index`, tagged with its id so a stale time never applies. */
+  time?: { id: string; t: number };
+};
+
+export function getSession(): Session | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const s = JSON.parse(localStorage.getItem(SS_KEY) ?? 'null') as Session | null;
+    if (!s?.queue?.length) return null;
+    s.time = JSON.parse(localStorage.getItem(SS_TIME_KEY) ?? 'null') ?? undefined;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+/** The queue and settings — written when they change. Position goes through saveSessionTime. */
+export function saveSession(s: Omit<Session, 'time'>) {
+  // Object URLs for local artwork are per-session, so drop them before persisting.
+  const queue = s.queue.map((t) => (t.local ? { ...t, artwork: undefined } : t));
+  localStorage.setItem(SS_KEY, JSON.stringify({ ...s, queue }));
+}
+
+/** Written every few seconds of playback — its own key so the queue isn't rewritten per tick. */
+export function saveSessionTime(id: string, t: number) {
+  localStorage.setItem(SS_TIME_KEY, JSON.stringify({ id, t }));
+}
+
 /* ---------- Playlists: localStorage, no server ---------- */
 
 const PL_KEY = 'playlists';

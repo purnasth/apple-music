@@ -16,7 +16,16 @@ import {
   TbVolumeOff,
   TbX,
 } from "react-icons/tb";
-import { Track, audioSrc, fmtTime, isPreview, shuffled } from "@/lib/music";
+import {
+  Track,
+  audioSrc,
+  fmtTime,
+  getSession,
+  isPreview,
+  saveSession,
+  saveSessionTime,
+  shuffled,
+} from "@/lib/music";
 import Image from "next/image";
 
 /** Feeds the styled range its filled (and buffered) proportion; see .range in globals.css. */
@@ -43,13 +52,17 @@ export default function Player({
 }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const objectUrl = useRef<string | null>(null);
+  // The saved session seeds settings; the queue itself is restored by the page.
+  const [init] = useState(getSession);
+  const resume = useRef(init?.time ?? null);
+  const lastSaved = useRef(0);
   const [time, setTime] = useState(0);
   const [dur, setDur] = useState(0);
   const [buffered, setBuffered] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [muted, setMuted] = useState(false);
-  const [repeat, setRepeat] = useState(false);
-  const [shuffle, setShuffle] = useState(false);
+  const [volume, setVolume] = useState(init?.volume ?? 1);
+  const [muted, setMuted] = useState(init?.muted ?? false);
+  const [repeat, setRepeat] = useState(init?.repeat ?? false);
+  const [shuffle, setShuffle] = useState(init?.shuffle ?? false);
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
@@ -118,6 +131,16 @@ export default function Player({
         if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
         objectUrl.current = src.startsWith("blob:") ? src : null;
         audioRef.current.src = src;
+        // Restored session: pick up at the saved position, but only in the very
+        // track it was saved for. Any other load starts the clock over.
+        const r = resume.current;
+        resume.current = null;
+        if (r && r.id === track.id) {
+          audioRef.current.currentTime = r.t;
+          setTime(r.t);
+        } else {
+          saveSessionTime(track.id, 0);
+        }
         if (playing) audioRef.current.play().catch(() => setPlaying(false));
       })
       .catch(
@@ -138,6 +161,8 @@ export default function Player({
     if (!a || !a.src) return;
     if (playing) a.play().catch(() => setPlaying(false));
     else a.pause();
+    if ("mediaSession" in navigator)
+      navigator.mediaSession.playbackState = playing ? "playing" : "paused";
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing]);
 
@@ -148,6 +173,23 @@ export default function Player({
   useEffect(() => {
     if (audioRef.current) audioRef.current.muted = muted;
   }, [muted]);
+
+  // Persist the session as it changes, so the next visit resumes it (Spotify-style).
+  // Playback position goes through saveSessionTime instead — see onTimeUpdate.
+  useEffect(() => {
+    if (track) saveSession({ queue, index, volume, muted, shuffle, repeat });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, index, volume, muted, shuffle, repeat]);
+
+  // The exact position on the way out — tab close, reload, navigation.
+  useEffect(() => {
+    const save = () => {
+      const a = audioRef.current;
+      if (a && track) saveSessionTime(track.id, a.currentTime);
+    };
+    window.addEventListener("pagehide", save);
+    return () => window.removeEventListener("pagehide", save);
+  }, [track]);
 
   // OS-level media keys / lockscreen controls — free via the native API.
   useEffect(() => {
@@ -162,6 +204,22 @@ export default function Player({
     navigator.mediaSession.setActionHandler("pause", () => setPlaying(false));
     navigator.mediaSession.setActionHandler("previoustrack", prev);
     navigator.mediaSession.setActionHandler("nexttrack", next);
+    // Lockscreen scrubbing; setPositionState in onTimeUpdate feeds it the position.
+    const jump = (t: number) => {
+      const a = audioRef.current;
+      if (!a) return;
+      a.currentTime = Math.min(Math.max(t, 0), a.duration || Infinity);
+      setTime(a.currentTime);
+    };
+    navigator.mediaSession.setActionHandler("seekto", (d) => {
+      if (d.seekTime != null) jump(d.seekTime);
+    });
+    navigator.mediaSession.setActionHandler("seekbackward", (d) =>
+      jump((audioRef.current?.currentTime ?? 0) - (d.seekOffset ?? 10)),
+    );
+    navigator.mediaSession.setActionHandler("seekforward", (d) =>
+      jump((audioRef.current?.currentTime ?? 0) + (d.seekOffset ?? 10)),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track, index, queue, shuffle, repeat]);
 
@@ -292,7 +350,21 @@ export default function Player({
       <audio
         ref={audioRef}
         preload="auto"
-        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => {
+          const a = e.currentTarget;
+          setTime(a.currentTime);
+          // Checkpoint the position every few seconds; pagehide catches the rest.
+          if (Math.abs(a.currentTime - lastSaved.current) > 5) {
+            lastSaved.current = a.currentTime;
+            saveSessionTime(track.id, a.currentTime);
+          }
+          if ("mediaSession" in navigator && isFinite(a.duration))
+            navigator.mediaSession.setPositionState({
+              duration: a.duration,
+              position: Math.min(a.currentTime, a.duration),
+              playbackRate: a.playbackRate,
+            });
+        }}
         onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
         onProgress={(e) => {
           const b = e.currentTarget.buffered;

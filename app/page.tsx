@@ -29,6 +29,7 @@ import {
   getLibrary,
   removeTrack,
   getPlaylists,
+  getSession,
   savePlaylists,
   fmtTime,
   shuffled,
@@ -90,7 +91,15 @@ export default function Home() {
   const searchBox = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getLibrary().then(setLibrary);
+    getLibrary().then((lib) => {
+      setLibrary(lib);
+      // Bring back the last session's queue, paused where it left off.
+      const s = getSession();
+      if (s) {
+        setQueue(s.queue);
+        setQIndex(Math.min(s.index, s.queue.length - 1));
+      }
+    });
     setPlaylists(getPlaylists());
     // Streams, caches and range-serves the bundled songs — see public/sw.js.
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
