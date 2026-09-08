@@ -38,9 +38,6 @@ Until that switch is off, every push fails at the prebuild guard. That failure i
 the guard working: a red build is recoverable, a silent wipe is not. Do not
 "fix" it by removing `scripts/check-songs.mjs`.
 
-`.github/workflows/ci.yml` covers what CI can usefully do here — type check and
-tests on every push, no build and no deploy — so pushes still get a green check.
-
 If you would rather have merges deploy on their own, there are two routes and
 neither is free of cost. Committing the audio to git gives CI the files — about
 1.1 GB in history, permanently, and a slower clone on every build. Or move the
