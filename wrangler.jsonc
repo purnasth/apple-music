@@ -2,15 +2,24 @@
 // site to ./out and there is no server to run. Without this file `wrangler deploy`
 // auto-detects "Next.js", assumes SSR, and runs the OpenNext migration — which then
 // dies on a missing .next/standalone that a static export never produces.
+//
+// The Worker exists only to serve the library out of R2. A deploy replaces the whole
+// asset manifest, so while the audio lived in ./out a deploy from a clone published
+// an empty library over a working one. Out of the manifest, it cannot.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "apple-music",
+  "main": "worker/index.ts",
   "compatibility_date": "2026-09-06",
-  // No "main": static assets only, no Worker script.
   "assets": {
     "directory": "./out",
+    "binding": "ASSETS",
     "not_found_handling": "404-page",
-    "html_handling": "auto-trailing-slash"
+    "html_handling": "auto-trailing-slash",
+    // Only the media paths pay a Worker invocation; everything else is served
+    // straight off the asset edge, which keeps the free tier intact.
+    "run_worker_first": ["/songs/*", "/songs-art/*", "/songs.json"]
   },
+  "r2_buckets": [{ "binding": "LIBRARY", "bucket_name": "apple-music-library" }],
   "observability": { "enabled": true }
 }
