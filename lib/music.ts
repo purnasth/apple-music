@@ -241,6 +241,28 @@ export function saveSessionTime(id: string, t: number) {
   localStorage.setItem(SS_TIME_KEY, JSON.stringify({ id, t }));
 }
 
+/* ---------- Recently played: a small localStorage ring ---------- */
+
+const RECENT_KEY = 'recent';
+
+export function getRecent(): Track[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as Track[];
+  } catch {
+    return [];
+  }
+}
+
+/** Move the track to the head, keep the last 20, and hand back the new list. */
+export function pushRecent(t: Track): Track[] {
+  // Object URLs for local artwork are per-session, so drop them before persisting.
+  const head = t.local ? { ...t, artwork: undefined } : t;
+  const list = [head, ...getRecent().filter((x) => x.id !== t.id)].slice(0, 20);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  return list;
+}
+
 /* ---------- Playlists: localStorage, no server ---------- */
 
 const PL_KEY = 'playlists';
