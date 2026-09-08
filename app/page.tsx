@@ -395,6 +395,7 @@ export default function Home() {
                     <img
                       src={t.artwork}
                       alt=""
+                      loading="lazy"
                       className="h-24 w-24 rounded-[10px] object-cover shadow-sm shadow-black/40"
                     />
                   ) : (
@@ -893,6 +894,7 @@ function Row({
           <img
             src={track.artwork}
             alt=""
+            loading="lazy"
             className="h-11 w-11 rounded-[7px] object-cover shadow-sm shadow-black/40"
           />
         ) : (

@@ -4,17 +4,57 @@
 // through to the player while a copy lands in the Cache API; every later play,
 // and every seek, is answered locally with a proper 206 — so replays are
 // instant, work offline, and seeking works everywhere.
+// The app shell is cached too, so an installed app opens — and plays every
+// cached song — with no connection at all.
 const CACHE = 'songs-v1';
+const APP = 'app-v1';
 
 self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('activate', (e) =>
+  e.waitUntil(
+    Promise.all([
+      self.clients.claim(),
+      // Drop caches an older sw.js left behind, keeping the two live ones.
+      caches.keys().then((keys) =>
+        Promise.all(keys.filter((k) => k !== CACHE && k !== APP).map((k) => caches.delete(k)))
+      ),
+    ])
+  )
+);
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (url.origin === location.origin && url.pathname.startsWith('/songs/')) {
-    e.respondWith(serve(e));
-  }
+  if (url.origin !== location.origin) return;
+  if (url.pathname.startsWith('/songs/')) return e.respondWith(serve(e));
+  // Hash-named, so immutable: covers and built JS/CSS never change under their URL.
+  if (url.pathname.startsWith('/songs-art/') || url.pathname.startsWith('/_next/static/'))
+    return e.respondWith(cacheFirst(e.request));
+  // The shell and manifest change per deploy: network first, cache as offline fallback.
+  if (e.request.mode === 'navigate' || url.pathname === '/songs.json')
+    return e.respondWith(networkFirst(e.request));
 });
+
+async function cacheFirst(req) {
+  const cache = await caches.open(APP);
+  const hit = await cache.match(req.url);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok) cache.put(req.url, res.clone()).catch(() => {});
+  return res;
+}
+
+async function networkFirst(req) {
+  const cache = await caches.open(APP);
+  try {
+    const res = await fetch(req);
+    if (res.ok) cache.put(req.url, res.clone()).catch(() => {});
+    return res;
+  } catch {
+    const hit = await cache.match(req.url);
+    if (hit) return hit;
+    throw new Error('offline with no cached copy');
+  }
+}
 
 /** "bytes=a-b" | "bytes=a-" → [a, b] clamped to size, or null if unusable. */
 function parseRange(header, size) {

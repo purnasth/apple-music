@@ -15,7 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Music",
   description: "Search, preview and play your music library — no account, no server.",
+  manifest: "/manifest.webmanifest",
+  icons: { apple: "/apple-touch-icon.png" },
 };
+
+export const viewport = { themeColor: "#000000" };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

@@ -198,7 +198,11 @@ export default function Player({
       title: track.title,
       artist: track.artist,
       album: track.album,
-      artwork: track.artwork ? [{ src: track.artwork, sizes: "600x600" }] : [],
+      // The lockscreen renders big — feed it the 600px cover, not the thumb.
+      artwork: (() => {
+        const art = track.artworkLarge ?? track.artwork;
+        return art ? [{ src: art, sizes: "600x600" }] : [];
+      })(),
     });
     navigator.mediaSession.setActionHandler("play", () => setPlaying(true));
     navigator.mediaSession.setActionHandler("pause", () => setPlaying(false));
