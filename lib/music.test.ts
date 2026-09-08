@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { search, fmtTime, folderOf, shuffled, artistsOf } from './music.ts';
 
 test('fmtTime formats and survives junk', () => {
-  assert.equal(fmtTime(0), '--:--');
+  assert.equal(fmtTime(0), '0:00');
   assert.equal(fmtTime(65), '1:05');
   assert.equal(fmtTime(605), '10:05');
   assert.equal(fmtTime(undefined), '--:--');

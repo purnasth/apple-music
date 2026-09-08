@@ -91,6 +91,7 @@ export default function Home() {
 
   const [scrolled, setScrolled] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const searchBox = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -238,6 +239,42 @@ export default function Home() {
     }
   }, []);
 
+  // The whole window is the drop target: dragging files in from any tab raises
+  // an overlay, and the drop lands in the library. Enter/leave nest through
+  // child elements, so a depth counter decides when the drag truly left.
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) =>
+      !!e.dataTransfer?.types.includes("Files");
+    const enter = (e: DragEvent) => {
+      if (hasFiles(e) && ++depth === 1) setDragging(true);
+    };
+    const leave = (e: DragEvent) => {
+      if (hasFiles(e) && --depth === 0) setDragging(false);
+    };
+    const over = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDragging(false);
+      onFiles(Array.from(e.dataTransfer!.files));
+      setTab("library");
+    };
+    window.addEventListener("dragenter", enter);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragenter", enter);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", drop);
+    };
+  }, [onFiles]);
+
   const folders = [
     ...new Set(
       library
@@ -374,7 +411,10 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-5">
-        {tab === "library" && (
+        {/* The big dropzone is the empty library's call to action. Once songs
+            exist it folds into a toolbar button, and dropping files anywhere
+            on the page imports them (see the dragging overlay). */}
+        {tab === "library" && !library.length && (
           <DropZone onFiles={onFiles} importing={importing} />
         )}
 
@@ -395,6 +435,7 @@ export default function Home() {
                     <img
                       src={t.artwork}
                       alt=""
+                      loading="lazy"
                       className="h-24 w-24 rounded-[10px] object-cover shadow-sm shadow-black/40"
                     />
                   ) : (
@@ -582,6 +623,7 @@ export default function Home() {
                 <TbArrowsShuffle size={13} />
                 Shuffle
               </button>
+              <ImportButtons onFiles={onFiles} importing={importing} />
             </div>
 
             {(!!needle || !!artist) && (
@@ -698,6 +740,18 @@ export default function Home() {
       </button>
 
       {showKeys && <ShortcutSheet onClose={() => setShowKeys(false)} />}
+
+      {/* pointer-events-none: the drop itself must fall through to the window. */}
+      {dragging && (
+        <div className="pointer-events-none fixed inset-0 z-[60] grid place-items-center bg-black/70 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-sheet border-2 border-dashed border-accent px-12 py-10 text-center">
+            <TbUpload className="text-accent" size={36} />
+            <p className="text-sm font-medium">
+              Drop audio files to add them to your library
+            </p>
+          </div>
+        </div>
+      )}
 
       <Player
         queue={queue}
@@ -893,6 +947,7 @@ function Row({
           <img
             src={track.artwork}
             alt=""
+            loading="lazy"
             className="h-11 w-11 rounded-[7px] object-cover shadow-sm shadow-black/40"
           />
         ) : (
@@ -997,6 +1052,62 @@ function Row({
   );
 }
 
+/** Import compacted into the toolbar — the dropzone card only greets an empty library. */
+function ImportButtons({
+  onFiles,
+  importing,
+}: {
+  onFiles: (f: File[]) => void;
+  importing: string | null;
+}) {
+  const files = useRef<HTMLInputElement>(null);
+  const folder = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <input
+        ref={files}
+        type="file"
+        accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus"
+        multiple
+        hidden
+        onChange={(e) => {
+          onFiles(Array.from(e.target.files ?? []));
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={folder}
+        type="file"
+        multiple
+        hidden
+        {...({ webkitdirectory: "" } as Record<string, string>)}
+        onChange={(e) => {
+          onFiles(Array.from(e.target.files ?? []));
+          e.target.value = "";
+        }}
+      />
+      <button
+        onClick={() => files.current?.click()}
+        disabled={!!importing}
+        title="Import audio files — or drop them anywhere on the page"
+        className="flex h-9 items-center gap-1.5 rounded-control bg-fill px-4 text-xs font-medium text-label transition hover:bg-fill-2 active:scale-[0.97] disabled:opacity-60"
+      >
+        <TbUpload size={13} />
+        {importing ? `Importing ${importing}…` : "Import"}
+      </button>
+      <button
+        onClick={() => folder.current?.click()}
+        disabled={!!importing}
+        aria-label="Import a whole folder"
+        title="Import a whole folder"
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-fill text-label-2 transition hover:bg-fill-2 hover:text-label active:scale-[0.97] disabled:opacity-60"
+      >
+        <TbFolderPlus size={15} />
+      </button>
+    </>
+  );
+}
+
 function DropZone({
   onFiles,
   importing,
@@ -1006,26 +1117,13 @@ function DropZone({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
-  const [over, setOver] = useState(false);
 
   return (
     <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setOver(false);
-        onFiles(Array.from(e.dataTransfer.files));
-      }}
+      // Dropping is handled window-wide by the page's dragging overlay; this
+      // card is the empty library's click-to-choose affordance.
       onClick={() => input.current?.click()}
-      className={`mb-5 cursor-pointer rounded-card border border-dashed p-6 text-center text-xs transition ${
-        over
-          ? "border-accent bg-accent/10 text-label"
-          : "border-separator text-label-2 hover:border-label-3 hover:bg-fill"
-      }`}
+      className="mb-5 cursor-pointer rounded-card border border-dashed border-separator p-6 text-center text-xs text-label-2 transition hover:border-label-3 hover:bg-fill"
     >
       <input
         ref={input}

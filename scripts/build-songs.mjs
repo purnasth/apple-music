@@ -81,7 +81,10 @@ for (const file of files) {
     album,
     artwork,
     artworkLarge,
-    preview: `/songs/${parts.map(encodeURIComponent).join('/')}`,
+    // ?v= makes the URL change when the file does, so the service worker's
+    // cache (keyed by full URL) can never serve a stale copy of a replaced
+    // song. Old versions linger in the cache until its activate cleanup.
+    preview: `/songs/${parts.map(encodeURIComponent).join('/')}?v=${(await stat(file)).size}`,
     duration,
     folder: parts.length > 1 ? parts.at(-2) : undefined,
   });
