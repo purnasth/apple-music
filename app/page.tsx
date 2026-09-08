@@ -92,6 +92,8 @@ export default function Home() {
   useEffect(() => {
     getLibrary().then(setLibrary);
     setPlaylists(getPlaylists());
+    // Streams, caches and range-serves the bundled songs — see public/sw.js.
+    navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }, []);
 
   useEffect(() => {

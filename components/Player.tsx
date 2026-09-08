@@ -19,9 +19,12 @@ import {
 import { Track, audioSrc, fmtTime, isPreview, shuffled } from "@/lib/music";
 import Image from "next/image";
 
-/** Feeds the styled range its filled proportion; see .range in globals.css. */
-const filled = (value: number, max: number) =>
-  ({ "--range-pct": `${max > 0 ? (value / max) * 100 : 0}%` }) as CSSProperties;
+/** Feeds the styled range its filled (and buffered) proportion; see .range in globals.css. */
+const filled = (value: number, max: number, buffered = 0) =>
+  ({
+    "--range-pct": `${max > 0 ? (value / max) * 100 : 0}%`,
+    "--buffered-pct": `${max > 0 ? (buffered / max) * 100 : 0}%`,
+  }) as CSSProperties;
 
 type Props = {
   queue: Track[];
@@ -42,6 +45,7 @@ export default function Player({
   const objectUrl = useRef<string | null>(null);
   const [time, setTime] = useState(0);
   const [dur, setDur] = useState(0);
+  const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [repeat, setRepeat] = useState(false);
@@ -70,6 +74,14 @@ export default function Player({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shuffle, queue]);
 
+  // Warm whatever plays next — the service worker caches /songs/*, so skipping
+  // ahead (or the track just ending) starts instantly instead of re-downloading.
+  useEffect(() => {
+    const path = order ?? queue.map((_, i) => i);
+    const nxt = queue[path[path.indexOf(index) + 1]];
+    if (nxt?.preview?.startsWith("/songs/")) fetch(nxt.preview).catch(() => {});
+  }, [index, order, queue]);
+
   /** Walk the play order, which is the shuffled one when shuffle is on. */
   const step = (delta: 1 | -1) => {
     if (!queue.length) return;
@@ -95,6 +107,7 @@ export default function Player({
     let cancelled = false;
     setError(null);
     setTime(0);
+    setBuffered(0);
     if (!track) return;
 
     setLoading(true);
@@ -278,12 +291,13 @@ export default function Player({
       {/* Stays mounted across the view switch — remounting it would restart the track. */}
       <audio
         ref={audioRef}
-        // Cloudflare's static assets ignore Range headers and answer with the whole file,
-        // so a seek past what is buffered refetches from byte 0 and playback restarts.
-        // preload="auto" buffers the track up front, keeping seeks inside the buffer.
         preload="auto"
         onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
+        onProgress={(e) => {
+          const b = e.currentTarget.buffered;
+          if (b.length) setBuffered(b.end(b.length - 1));
+        }}
         onEnded={next}
         onError={() => setError("Playback failed.")}
       />
@@ -297,6 +311,7 @@ export default function Player({
           loading={loading}
           time={time}
           dur={seekMax}
+          buffered={buffered}
           onSeek={seek}
           playing={playing}
           setPlaying={setPlaying}
@@ -393,7 +408,7 @@ export default function Player({
                   step={0.1}
                   onChange={(e) => seek(Number(e.target.value))}
                   className="range flex-1"
-                  style={filled(time, seekMax)}
+                  style={filled(time, seekMax, buffered)}
                   aria-label="Seek"
                 />
                 <span className="w-9 text-[10px] tabular-nums text-label-3">
@@ -507,6 +522,7 @@ function FullView({
   loading,
   time,
   dur,
+  buffered,
   onSeek,
   playing,
   setPlaying,
@@ -532,6 +548,7 @@ function FullView({
   loading: boolean;
   time: number;
   dur: number;
+  buffered: number;
   onSeek: (t: number) => void;
   playing: boolean;
   setPlaying: (p: boolean) => void;
@@ -710,7 +727,7 @@ function FullView({
                 step={0.1}
                 onChange={(e) => onSeek(Number(e.target.value))}
                 className="range range-light flex-1"
-                style={filled(time, dur)}
+                style={filled(time, dur, buffered)}
                 aria-label="Seek"
               />
               <span className="w-10 text-xs tabular-nums text-white/60">
