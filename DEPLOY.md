@@ -34,6 +34,13 @@ empty.
 apple-music → Settings → Builds — so a merge cannot wipe the songs. Publish with
 `npm run deploy` instead.
 
+Until that switch is off, every push fails at the prebuild guard. That failure is
+the guard working: a red build is recoverable, a silent wipe is not. Do not
+"fix" it by removing `scripts/check-songs.mjs`.
+
+`.github/workflows/ci.yml` covers what CI can usefully do here — type check and
+tests on every push, no build and no deploy — so pushes still get a green check.
+
 If you would rather have merges deploy on their own, the alternative is to commit
 the audio to git so CI has it: about 840 MB in history, permanently, and a slower
 clone on every build. That is the trade — automatic merges, or a small repo.
