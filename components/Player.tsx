@@ -465,7 +465,7 @@ export default function Player({
                 <span className="block truncate text-xs font-medium sm:text-sm">
                   {track.title}
                 </span>
-                <span className="block truncate text-[11px] text-label-2 sm:text-xs">
+                <span className="block truncate text-xxs text-label-2 sm:text-xs">
                   {track.artist}
                   {isPreview(track) ? " · 30s preview" : ""}
                 </span>
@@ -475,7 +475,7 @@ export default function Player({
               )}
 
               <div className="mt-1.5 flex items-center gap-2">
-                <span className="text-[10px] tabular-nums text-label-3">
+                <span className="text-[8px] sm:text-xxs tabular-nums text-label-3">
                   {fmtTime(time)}
                 </span>
                 <input
@@ -489,7 +489,7 @@ export default function Player({
                   style={filled(time, seekMax, buffered)}
                   aria-label="Seek"
                 />
-                <span className="text-[10px] tabular-nums text-label-3">
+                <span className="text-[8px] sm:text-xxs tabular-nums text-label-3">
                   {fmtTime(seekMax)}
                 </span>
               </div>
