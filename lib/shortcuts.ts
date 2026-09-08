@@ -11,7 +11,8 @@
  * so they are deliberately not copied.
  *
  * Grouped rather than flat so the sheet can lay them out in columns instead of
- * one long striped list.
+ * one long striped list. The order is the layout: CSS balances the four blocks
+ * into two columns, and this order splits them 10 rows and 10.
  */
 export const SHORTCUT_GROUPS: {
   title: string;
@@ -28,11 +29,13 @@ export const SHORTCUT_GROUPS: {
     ],
   },
   {
-    title: "Sound",
+    title: "View",
     items: [
-      { keys: ["↑"], label: "Volume up" },
-      { keys: ["↓"], label: "Volume down" },
-      { keys: ["M"], label: "Mute" },
+      { keys: ["I"], label: "Full view, queue and all" },
+      { keys: ["F"], label: "Full screen, queue hidden" },
+      { keys: ["Esc"], label: "Leave the full view" },
+      { keys: ["/"], label: "Jump to search" },
+      { keys: ["?"], label: "Show this list" },
     ],
   },
   {
@@ -48,13 +51,11 @@ export const SHORTCUT_GROUPS: {
     ],
   },
   {
-    title: "View",
+    title: "Sound",
     items: [
-      { keys: ["I"], label: "Full view, queue and all" },
-      { keys: ["F"], label: "Full screen, queue hidden" },
-      { keys: ["Esc"], label: "Leave the full view" },
-      { keys: ["/"], label: "Jump to search" },
-      { keys: ["?"], label: "Show this list" },
+      { keys: ["↑"], label: "Volume up" },
+      { keys: ["↓"], label: "Volume down" },
+      { keys: ["M"], label: "Mute" },
     ],
   },
 ];

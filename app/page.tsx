@@ -277,7 +277,7 @@ export default function Home() {
           : [];
 
   return (
-    <div className="min-h-dvh bg-canvas pb-32 text-label sm:pb-24">
+    <div className="min-h-dvh bg-canvas pb-40 text-label sm:pb-28">
       <header
         className={`glass sticky top-0 z-30 border-b transition-colors ${
           scrolled ? "border-separator" : "border-transparent"
@@ -640,7 +640,7 @@ export default function Home() {
               }`}
             >
               <Icon size={19} />
-              <span className="text-[10px] font-medium tracking-tight">
+              <span className="text-xxs font-medium tracking-tight">
                 {label}
               </span>
             </button>
@@ -679,47 +679,61 @@ function ShortcutSheet({ onClose }: { onClose: () => void }) {
 
         {/* Two columns of tight groups rather than one long striped list: the
             heading carries the grouping, so the rows need no banding and no
-            padding of their own. */}
-        <div className="columns-1 gap-x-7 sm:columns-2">
-          {SHORTCUT_GROUPS.map(({ title, items }) => (
-            <section key={title} className="mb-4 break-inside-avoid">
-              <h3 className="mb-1 border-b border-separator pb-1 text-[10px] font-semibold uppercase tracking-widest text-label-3">
-                {title}
-              </h3>
-              <dl>
-                {items.map(({ keys, label }) => (
-                  <div
-                    key={label}
-                    className="flex items-baseline gap-2 py-[3px] text-xs"
-                  >
-                    <dt className="shrink-0 text-label-2">{label}</dt>
-                    {/* A dotted leader ties the label to its keys without a row
+            padding of their own.
+
+            A real grid rather than CSS columns, because :last-child in a column
+            box still means last in the DOM — only Sound would drop its margin,
+            and View would keep a trailing gap that tips the columns out of
+            balance again. Split explicitly, each column is its own element and
+            last:mb-0 means what it says. */}
+        <div className="mt-4 grid gap-8 sm:grid-cols-2 sm:gap-x-7 sm:gap-y-0">
+          {[SHORTCUT_GROUPS.slice(0, 2), SHORTCUT_GROUPS.slice(2)].map(
+            (column, i) => (
+              <div key={i}>
+                {column.map(({ title, items }) => (
+                  <section key={title} className="mb-8 last:mb-0">
+                    <h3 className="mb-1 border-b border-separator pb-1 text-xxs font-semibold uppercase tracking-widest text-label-3">
+                      {title}
+                    </h3>
+                    <dl>
+                      {items.map(({ keys, label }) => (
+                        <div
+                          key={label}
+                          className="flex items-baseline gap-2 py-[3px] text-xs"
+                        >
+                          <dt className="shrink-0 text-label-2 text-xxs">
+                            {label}
+                          </dt>
+                          {/* A dotted leader ties the label to its keys without a row
                         background doing the work. */}
-                    <span
-                      aria-hidden
-                      className="min-w-3 flex-1 translate-y-[-3px] border-b border-dotted border-separator"
-                    />
-                    <dd className="flex shrink-0 items-center gap-1">
-                      {keys.map((k) =>
-                        k === "\u2013" ? (
-                          <span key={k} className="text-label-3">
-                            &ndash;
-                          </span>
-                        ) : (
-                          <kbd
-                            key={k}
-                            className="min-w-5 rounded-[5px] bg-fill-2 px-1.5 py-0.5 text-center font-sans text-[10px] leading-4 text-label"
-                          >
-                            {k}
-                          </kbd>
-                        ),
-                      )}
-                    </dd>
-                  </div>
+                          <span
+                            aria-hidden
+                            className="min-w-3 flex-1 translate-y-[-3px] border-b border-dotted border-separator"
+                          />
+                          <dd className="flex shrink-0 items-center gap-1">
+                            {keys.map((k) =>
+                              k === "\u2013" ? (
+                                <span key={k} className="text-label-3">
+                                  &ndash;
+                                </span>
+                              ) : (
+                                <kbd
+                                  key={k}
+                                  className="min-w-5 rounded-[5px] bg-fill-2 px-1.5 py-px text-center font-sans text-xxs leading-4 text-label"
+                                >
+                                  {k}
+                                </kbd>
+                              ),
+                            )}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
                 ))}
-              </dl>
-            </section>
-          ))}
+              </div>
+            ),
+          )}
         </div>
       </div>
     </div>
@@ -820,7 +834,7 @@ function Row({
       </span>
 
       {isPreview(track) && (
-        <span className="hidden rounded-full bg-fill px-2 py-0.5 text-[10px] font-medium text-label-2 md:block">
+        <span className="hidden rounded-full bg-fill px-2 py-0.5 text-xxs font-medium text-label-2 md:block">
           Preview
         </span>
       )}

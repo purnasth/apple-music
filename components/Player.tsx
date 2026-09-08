@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
 import {
   TbArrowsMaximize,
   TbArrowsShuffle,
@@ -18,6 +18,10 @@ import {
 } from "react-icons/tb";
 import { Track, audioSrc, fmtTime, isPreview, shuffled } from "@/lib/music";
 import Image from "next/image";
+
+/** Feeds the styled range its filled proportion; see .range in globals.css. */
+const filled = (value: number, max: number) =>
+  ({ "--range-pct": `${max > 0 ? (value / max) * 100 : 0}%` }) as CSSProperties;
 
 type Props = {
   queue: Track[];
@@ -314,126 +318,153 @@ export default function Player({
       )}
 
       <div
-        className={`glass fixed inset-x-0 bottom-14 z-40 border-t border-separator sm:bottom-0 ${
+        className={`fixed inset-x-0 bottom-14 z-40 px-3 pb-3 sm:bottom-0 sm:px-4 sm:pb-4 ${
           full ? "hidden" : ""
         }`}
       >
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-2 sm:gap-4 sm:px-4 sm:py-3">
-          <button
-            onClick={() => openFull(true)}
-            aria-label="Play fullscreen"
-            title="Play fullscreen"
-            className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-[8px] shadow-sm shadow-black/40 sm:h-14 sm:w-14"
-          >
-            {track.artwork ? (
-              <img
-                src={track.artwork}
-                alt=""
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="grid h-full w-full place-items-center bg-fill text-label-3">
-                <TbMusic size={22} />
-              </div>
-            )}
-            <span className="absolute inset-0 grid place-items-center bg-black/55 text-white opacity-0 transition group-hover:opacity-100">
-              <TbArrowsMaximize size={20} />
-            </span>
-          </button>
+        {/* A floating capsule rather than an edge-to-edge slab: the functional
+            layer sits above the content, it is not welded to the screen. */}
+        <div className="glass relative mx-auto max-w-6xl overflow-hidden rounded-sheet shadow-2xl shadow-black/50 ring-1 ring-white/10">
+          {/* Glass has no colour of its own — it takes it from what is behind.
+              Nothing is behind a bar at the screen edge, so the artwork stands in
+              and the capsule reads in the album's colour (HIG — Liquid Glass). */}
+          {track.artwork && (
+            <img
+              src={track.artwork}
+              alt=""
+              aria-hidden
+              className="pointer-events-none absolute inset-0 h-full w-full scale-150 object-cover opacity-35 blur-2xl saturate-150"
+            />
+          )}
+          {/* The rim light that gives the material its thickness. */}
+          <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
 
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium" title={track.title}>
-              {track.title}
-            </div>
-            <div className="truncate text-xs text-label-2">
-              {track.artist}
-              {isPreview(track) ? " · 30s preview" : ""}
-            </div>
-            {error && (
-              <div className="truncate text-xs text-accent">{error}</div>
-            )}
-
-            <div className="mt-1.5 flex items-center gap-2">
-              <span className="w-9 text-right text-[10px] tabular-nums text-label-3">
-                {fmtTime(time)}
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={seekMax}
-                value={time}
-                step={0.1}
-                onChange={(e) => seek(Number(e.target.value))}
-                className="h-1 flex-1 accent-[var(--color-accent)]"
-                aria-label="Seek"
-              />
-              <span className="w-9 text-[10px] tabular-nums text-label-3">
-                {fmtTime(seekMax)}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <span className="hidden sm:block">
-              <Btn
-                onClick={() => setShuffle(!shuffle)}
-                active={shuffle}
-                label="Shuffle"
-              >
-                <TbArrowsShuffle />
-              </Btn>
-            </span>
-            <Btn onClick={prev} label="Previous">
-              <TbPlayerSkipBackFilled />
-            </Btn>
+          <div className="relative flex items-center gap-3 p-2 sm:gap-4 sm:p-3">
             <button
-              onClick={() => setPlaying(!playing)}
-              aria-label={playing ? "Pause" : "Play"}
-              title={playing ? "Pause" : "Play"}
-              className="grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
+              onClick={() => openFull(true)}
+              aria-label="Play fullscreen"
+              title="Play fullscreen"
+              className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-[10px] shadow-lg shadow-black/40 ring-1 ring-white/10 sm:h-14 sm:w-14"
             >
-              {playing ? (
-                <TbPlayerPauseFilled size={18} />
+              {track.artwork ? (
+                <img
+                  src={track.artwork}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
               ) : (
-                <TbPlayerPlayFilled size={18} className="ml-0.5" />
+                <div className="grid h-full w-full place-items-center bg-fill text-label-3">
+                  <TbMusic size={22} />
+                </div>
               )}
+              <span className="absolute inset-0 grid place-items-center bg-black/55 text-white opacity-0 transition group-hover:opacity-100">
+                <TbArrowsMaximize size={20} />
+              </span>
             </button>
-            <Btn onClick={next} label="Next">
-              <TbPlayerSkipForwardFilled />
-            </Btn>
-            <span className="hidden sm:block">
-              <Btn
-                onClick={() => setRepeat(!repeat)}
-                active={repeat}
-                label="Repeat"
-              >
-                <TbRepeat />
-              </Btn>
-            </span>
-            <span className="ml-2 hidden items-center gap-2 sm:flex">
+
+            <div className="min-w-0 flex-1">
               <button
-                onClick={() => setMuted(!muted)}
-                aria-label={muted ? "Unmute" : "Mute"}
-                title={muted ? "Unmute (M)" : "Mute (M)"}
-                aria-pressed={muted}
-                className="shrink-0 text-label-2 transition hover:text-label"
+                onClick={() => openFull(true)}
+                title={`${track.title} — ${track.artist}`}
+                aria-label="Open the full player"
+                className="block w-full min-w-0 text-left"
               >
-                {muted ? <TbVolumeOff size={16} /> : <TbVolume size={16} />}
+                <span className="block truncate text-sm font-medium">
+                  {track.title}
+                </span>
+                <span className="block truncate text-xs text-label-2">
+                  {track.artist}
+                  {isPreview(track) ? " · 30s preview" : ""}
+                </span>
               </button>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={muted ? 0 : volume}
-                onChange={(e) => {
-                  setMuted(false);
-                  setVolume(Number(e.target.value));
-                }}
-                className="h-1 w-20 accent-[var(--color-accent)]"
-                aria-label="Volume"
-              />
-            </span>
+              {error && (
+                <div className="truncate text-xs text-accent">{error}</div>
+              )}
+
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="w-9 text-right text-[10px] tabular-nums text-label-3">
+                  {fmtTime(time)}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={seekMax}
+                  value={time}
+                  step={0.1}
+                  onChange={(e) => seek(Number(e.target.value))}
+                  className="range flex-1"
+                  style={filled(time, seekMax)}
+                  aria-label="Seek"
+                />
+                <span className="w-9 text-[10px] tabular-nums text-label-3">
+                  {fmtTime(seekMax)}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <span className="hidden sm:block">
+                <Btn
+                  onClick={() => setShuffle(!shuffle)}
+                  active={shuffle}
+                  label="Shuffle"
+                >
+                  <TbArrowsShuffle />
+                </Btn>
+              </span>
+              <Btn onClick={prev} label="Previous">
+                <TbPlayerSkipBackFilled />
+              </Btn>
+              <button
+                onClick={() => setPlaying(!playing)}
+                aria-label={playing ? "Pause" : "Play"}
+                title={playing ? "Pause" : "Play"}
+                className="grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
+              >
+                {playing ? (
+                  <TbPlayerPauseFilled size={18} />
+                ) : (
+                  <TbPlayerPlayFilled size={18} className="ml-0.5" />
+                )}
+              </button>
+              <Btn onClick={next} label="Next">
+                <TbPlayerSkipForwardFilled />
+              </Btn>
+              <span className="hidden sm:block">
+                <Btn
+                  onClick={() => setRepeat(!repeat)}
+                  active={repeat}
+                  label="Repeat"
+                >
+                  <TbRepeat />
+                </Btn>
+              </span>
+              <span className="ml-2 hidden items-center gap-2 sm:flex">
+                <button
+                  onClick={() => setMuted(!muted)}
+                  aria-label={muted ? "Unmute" : "Mute"}
+                  title={muted ? "Unmute (M)" : "Mute (M)"}
+                  aria-pressed={muted}
+                  className="shrink-0 text-label-2 transition hover:text-label"
+                >
+                  {muted ? <TbVolumeOff size={16} /> : <TbVolume size={16} />}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={muted ? 0 : volume}
+                  onChange={(e) => {
+                    setMuted(false);
+                    setVolume(Number(e.target.value));
+                  }}
+                  className="range w-20"
+                  style={filled(muted ? 0 : volume, 1)}
+                  aria-label="Volume"
+                />
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -678,7 +709,8 @@ function FullView({
                 value={time}
                 step={0.1}
                 onChange={(e) => onSeek(Number(e.target.value))}
-                className="h-1 flex-1 accent-white"
+                className="range range-light flex-1"
+                style={filled(time, dur)}
                 aria-label="Seek"
               />
               <span className="w-10 text-xs tabular-nums text-white/60">
@@ -741,7 +773,8 @@ function FullView({
                   setMuted(false);
                   setVolume(Number(e.target.value));
                 }}
-                className="h-1 w-40 accent-white"
+                className="range range-light w-40"
+                style={filled(muted ? 0 : volume, 1)}
                 aria-label="Volume"
               />
             </span>
