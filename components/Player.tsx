@@ -16,12 +16,24 @@ import {
   TbVolumeOff,
   TbX,
 } from "react-icons/tb";
-import { Track, audioSrc, fmtTime, isPreview, shuffled } from "@/lib/music";
+import {
+  Track,
+  audioSrc,
+  fmtTime,
+  getSession,
+  isPreview,
+  saveSession,
+  saveSessionTime,
+  shuffled,
+} from "@/lib/music";
 import Image from "next/image";
 
-/** Feeds the styled range its filled proportion; see .range in globals.css. */
-const filled = (value: number, max: number) =>
-  ({ "--range-pct": `${max > 0 ? (value / max) * 100 : 0}%` }) as CSSProperties;
+/** Feeds the styled range its filled (and buffered) proportion; see .range in globals.css. */
+const filled = (value: number, max: number, buffered = 0) =>
+  ({
+    "--range-pct": `${max > 0 ? (value / max) * 100 : 0}%`,
+    "--buffered-pct": `${max > 0 ? (buffered / max) * 100 : 0}%`,
+  }) as CSSProperties;
 
 type Props = {
   queue: Track[];
@@ -40,12 +52,17 @@ export default function Player({
 }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const objectUrl = useRef<string | null>(null);
+  // The saved session seeds settings; the queue itself is restored by the page.
+  const [init] = useState(getSession);
+  const resume = useRef(init?.time ?? null);
+  const lastSaved = useRef(0);
   const [time, setTime] = useState(0);
   const [dur, setDur] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [muted, setMuted] = useState(false);
-  const [repeat, setRepeat] = useState(false);
-  const [shuffle, setShuffle] = useState(false);
+  const [buffered, setBuffered] = useState(0);
+  const [volume, setVolume] = useState(init?.volume ?? 1);
+  const [muted, setMuted] = useState(init?.muted ?? false);
+  const [repeat, setRepeat] = useState(init?.repeat ?? false);
+  const [shuffle, setShuffle] = useState(init?.shuffle ?? false);
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
@@ -69,6 +86,14 @@ export default function Player({
     setOrder([index, ...shuffled(rest)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shuffle, queue]);
+
+  // Warm whatever plays next — the service worker caches /songs/*, so skipping
+  // ahead (or the track just ending) starts instantly instead of re-downloading.
+  useEffect(() => {
+    const path = order ?? queue.map((_, i) => i);
+    const nxt = queue[path[path.indexOf(index) + 1]];
+    if (nxt?.preview?.startsWith("/songs/")) fetch(nxt.preview).catch(() => {});
+  }, [index, order, queue]);
 
   /** Walk the play order, which is the shuffled one when shuffle is on. */
   const step = (delta: 1 | -1) => {
@@ -95,6 +120,7 @@ export default function Player({
     let cancelled = false;
     setError(null);
     setTime(0);
+    setBuffered(0);
     if (!track) return;
 
     setLoading(true);
@@ -105,6 +131,16 @@ export default function Player({
         if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
         objectUrl.current = src.startsWith("blob:") ? src : null;
         audioRef.current.src = src;
+        // Restored session: pick up at the saved position, but only in the very
+        // track it was saved for. Any other load starts the clock over.
+        const r = resume.current;
+        resume.current = null;
+        if (r && r.id === track.id) {
+          audioRef.current.currentTime = r.t;
+          setTime(r.t);
+        } else {
+          saveSessionTime(track.id, 0);
+        }
         if (playing) audioRef.current.play().catch(() => setPlaying(false));
       })
       .catch(
@@ -125,6 +161,8 @@ export default function Player({
     if (!a || !a.src) return;
     if (playing) a.play().catch(() => setPlaying(false));
     else a.pause();
+    if ("mediaSession" in navigator)
+      navigator.mediaSession.playbackState = playing ? "playing" : "paused";
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing]);
 
@@ -135,6 +173,23 @@ export default function Player({
   useEffect(() => {
     if (audioRef.current) audioRef.current.muted = muted;
   }, [muted]);
+
+  // Persist the session as it changes, so the next visit resumes it (Spotify-style).
+  // Playback position goes through saveSessionTime instead — see onTimeUpdate.
+  useEffect(() => {
+    if (track) saveSession({ queue, index, volume, muted, shuffle, repeat });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, index, volume, muted, shuffle, repeat]);
+
+  // The exact position on the way out — tab close, reload, navigation.
+  useEffect(() => {
+    const save = () => {
+      const a = audioRef.current;
+      if (a && track) saveSessionTime(track.id, a.currentTime);
+    };
+    window.addEventListener("pagehide", save);
+    return () => window.removeEventListener("pagehide", save);
+  }, [track]);
 
   // OS-level media keys / lockscreen controls — free via the native API.
   useEffect(() => {
@@ -149,6 +204,22 @@ export default function Player({
     navigator.mediaSession.setActionHandler("pause", () => setPlaying(false));
     navigator.mediaSession.setActionHandler("previoustrack", prev);
     navigator.mediaSession.setActionHandler("nexttrack", next);
+    // Lockscreen scrubbing; setPositionState in onTimeUpdate feeds it the position.
+    const jump = (t: number) => {
+      const a = audioRef.current;
+      if (!a) return;
+      a.currentTime = Math.min(Math.max(t, 0), a.duration || Infinity);
+      setTime(a.currentTime);
+    };
+    navigator.mediaSession.setActionHandler("seekto", (d) => {
+      if (d.seekTime != null) jump(d.seekTime);
+    });
+    navigator.mediaSession.setActionHandler("seekbackward", (d) =>
+      jump((audioRef.current?.currentTime ?? 0) - (d.seekOffset ?? 10)),
+    );
+    navigator.mediaSession.setActionHandler("seekforward", (d) =>
+      jump((audioRef.current?.currentTime ?? 0) + (d.seekOffset ?? 10)),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track, index, queue, shuffle, repeat]);
 
@@ -278,12 +349,27 @@ export default function Player({
       {/* Stays mounted across the view switch — remounting it would restart the track. */}
       <audio
         ref={audioRef}
-        // Cloudflare's static assets ignore Range headers and answer with the whole file,
-        // so a seek past what is buffered refetches from byte 0 and playback restarts.
-        // preload="auto" buffers the track up front, keeping seeks inside the buffer.
         preload="auto"
-        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => {
+          const a = e.currentTarget;
+          setTime(a.currentTime);
+          // Checkpoint the position every few seconds; pagehide catches the rest.
+          if (Math.abs(a.currentTime - lastSaved.current) > 5) {
+            lastSaved.current = a.currentTime;
+            saveSessionTime(track.id, a.currentTime);
+          }
+          if ("mediaSession" in navigator && isFinite(a.duration))
+            navigator.mediaSession.setPositionState({
+              duration: a.duration,
+              position: Math.min(a.currentTime, a.duration),
+              playbackRate: a.playbackRate,
+            });
+        }}
         onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
+        onProgress={(e) => {
+          const b = e.currentTarget.buffered;
+          if (b.length) setBuffered(b.end(b.length - 1));
+        }}
         onEnded={next}
         onError={() => setError("Playback failed.")}
       />
@@ -297,6 +383,7 @@ export default function Player({
           loading={loading}
           time={time}
           dur={seekMax}
+          buffered={buffered}
           onSeek={seek}
           playing={playing}
           setPlaying={setPlaying}
@@ -393,7 +480,7 @@ export default function Player({
                   step={0.1}
                   onChange={(e) => seek(Number(e.target.value))}
                   className="range flex-1"
-                  style={filled(time, seekMax)}
+                  style={filled(time, seekMax, buffered)}
                   aria-label="Seek"
                 />
                 <span className="w-9 text-[10px] tabular-nums text-label-3">
@@ -507,6 +594,7 @@ function FullView({
   loading,
   time,
   dur,
+  buffered,
   onSeek,
   playing,
   setPlaying,
@@ -532,6 +620,7 @@ function FullView({
   loading: boolean;
   time: number;
   dur: number;
+  buffered: number;
   onSeek: (t: number) => void;
   playing: boolean;
   setPlaying: (p: boolean) => void;
@@ -710,7 +799,7 @@ function FullView({
                 step={0.1}
                 onChange={(e) => onSeek(Number(e.target.value))}
                 className="range range-light flex-1"
-                style={filled(time, dur)}
+                style={filled(time, dur, buffered)}
                 aria-label="Seek"
               />
               <span className="w-10 text-xs tabular-nums text-white/60">

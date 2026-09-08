@@ -188,22 +188,79 @@ export async function audioSrc(track: Track, signal?: AbortSignal): Promise<stri
     return file ? URL.createObjectURL(file) : undefined;
   }
 
-  // Cloudflare's static assets answer a Range request with the whole file and no
-  // Accept-Ranges, so the browser cannot seek — currentTime past the buffer refetches
-  // from byte 0 and playback restarts. preload="auto" is not enough: Chrome buffers
-  // ahead, not to the end (measured 0-169s of a 276s track). Downloading once into a
-  // blob buffers the whole file, so every seek is local. Under a second per track.
-  if (track.id.startsWith('file:') && track.preview) {
-    const res = await fetch(track.preview, { signal });
-    if (!res.ok) throw new Error(`Could not load audio (${res.status})`);
-    return URL.createObjectURL(await res.blob());
-  }
+  // Bundled tracks stream straight off their URL: the service worker
+  // (public/sw.js) caches /songs/* and answers Range requests itself, which
+  // Cloudflare's static assets won't — so playback starts on the first chunks,
+  // seeks work, and replays come from the local cache, even offline.
+  if (track.id.startsWith('file:')) return track.preview;
 
   if (!expired(track.preview)) return track.preview;
   const id = track.id.startsWith('deezer:') ? track.id.slice(7) : undefined;
   if (!id) return track.preview;
   const fresh = await jsonp<DzTrack>(`track/${id}`, {}, signal);
   return fresh.preview ?? track.preview;
+}
+
+/* ---------- Session: resume where the listener left off ---------- */
+
+const SS_KEY = 'session';
+const SS_TIME_KEY = 'session-time';
+
+export type Session = {
+  queue: Track[];
+  index: number;
+  volume: number;
+  muted: boolean;
+  shuffle: boolean;
+  repeat: boolean;
+  /** Position in the track at `index`, tagged with its id so a stale time never applies. */
+  time?: { id: string; t: number };
+};
+
+export function getSession(): Session | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const s = JSON.parse(localStorage.getItem(SS_KEY) ?? 'null') as Session | null;
+    if (!s?.queue?.length) return null;
+    s.time = JSON.parse(localStorage.getItem(SS_TIME_KEY) ?? 'null') ?? undefined;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+/** The queue and settings — written when they change. Position goes through saveSessionTime. */
+export function saveSession(s: Omit<Session, 'time'>) {
+  // Object URLs for local artwork are per-session, so drop them before persisting.
+  const queue = s.queue.map((t) => (t.local ? { ...t, artwork: undefined } : t));
+  localStorage.setItem(SS_KEY, JSON.stringify({ ...s, queue }));
+}
+
+/** Written every few seconds of playback — its own key so the queue isn't rewritten per tick. */
+export function saveSessionTime(id: string, t: number) {
+  localStorage.setItem(SS_TIME_KEY, JSON.stringify({ id, t }));
+}
+
+/* ---------- Recently played: a small localStorage ring ---------- */
+
+const RECENT_KEY = 'recent';
+
+export function getRecent(): Track[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as Track[];
+  } catch {
+    return [];
+  }
+}
+
+/** Move the track to the head, keep the last 20, and hand back the new list. */
+export function pushRecent(t: Track): Track[] {
+  // Object URLs for local artwork are per-session, so drop them before persisting.
+  const head = t.local ? { ...t, artwork: undefined } : t;
+  const list = [head, ...getRecent().filter((x) => x.id !== t.id)].slice(0, 20);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  return list;
 }
 
 /* ---------- Playlists: localStorage, no server ---------- */

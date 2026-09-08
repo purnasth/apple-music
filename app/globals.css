@@ -150,6 +150,7 @@ nav,
 .range {
   --range-fill: var(--color-accent);
   --range-pct: 0%;
+  --buffered-pct: 0%;
   --range-h: 4px;
   --range-thumb: 12px;
   -webkit-appearance: none;
@@ -175,11 +176,17 @@ nav,
   height: var(--range-h);
   border-radius: 999px;
   border: 0;
+  /* Three layers: played, buffered (YouTube's grey bar), then the empty groove. */
   background:
     linear-gradient(
       to right,
       var(--range-fill) var(--range-pct),
       transparent var(--range-pct)
+    ),
+    linear-gradient(
+      to right,
+      rgba(255, 255, 255, 0.28) var(--buffered-pct),
+      transparent var(--buffered-pct)
     ),
     rgba(255, 255, 255, 0.18);
   transition: height 150ms ease;
@@ -209,7 +216,13 @@ nav,
   height: var(--range-h);
   border-radius: 999px;
   border: 0;
-  background: rgba(255, 255, 255, 0.18);
+  background:
+    linear-gradient(
+      to right,
+      rgba(255, 255, 255, 0.28) var(--buffered-pct),
+      transparent var(--buffered-pct)
+    ),
+    rgba(255, 255, 255, 0.18);
   transition: height 150ms ease;
 }
 

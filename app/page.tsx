@@ -29,6 +29,9 @@ import {
   getLibrary,
   removeTrack,
   getPlaylists,
+  getRecent,
+  getSession,
+  pushRecent,
   savePlaylists,
   fmtTime,
   shuffled,
@@ -84,14 +87,26 @@ export default function Home() {
   const [queue, setQueue] = useState<Track[]>([]);
   const [qIndex, setQIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [recent, setRecent] = useState<Track[]>([]);
 
   const [scrolled, setScrolled] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
   const searchBox = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getLibrary().then(setLibrary);
+    getLibrary().then((lib) => {
+      setLibrary(lib);
+      setRecent(getRecent());
+      // Bring back the last session's queue, paused where it left off.
+      const s = getSession();
+      if (s) {
+        setQueue(s.queue);
+        setQIndex(Math.min(s.index, s.queue.length - 1));
+      }
+    });
     setPlaylists(getPlaylists());
+    // Streams, caches and range-serves the bundled songs — see public/sw.js.
+    navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -158,6 +173,21 @@ export default function Home() {
     setQueue(tracks);
     setQIndex(i);
     setPlaying(true);
+    setRecent(pushRecent(tracks[i]));
+  };
+
+  /** Every index move (skip, auto-advance, queue click) lands here, so it can log history. */
+  const jumpTo = (i: number) => {
+    setQIndex(i);
+    if (queue[i]) setRecent(pushRecent(queue[i]));
+  };
+
+  /** Insert into the live queue — right after the current track, or at the end. */
+  const enqueue = (track: Track, mode: "next" | "end") => {
+    if (!queue.length) return play([track], 0);
+    const q = [...queue];
+    q.splice(mode === "next" ? qIndex + 1 : q.length, 0, track);
+    setQueue(q);
   };
 
   // A folder change can strand an artist selection that folder has no tracks for.
@@ -267,9 +297,19 @@ export default function Home() {
     )
     .sort(SORTS[sort]);
 
+  // Search covers the library too: your own full tracks rank above the
+  // catalogue's 30s previews, the way Apple Music folds "Your Library" in.
+  const q = query.trim().toLowerCase();
+  const libMatches =
+    tab === "search" && q
+      ? library.filter((t) =>
+          `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(q),
+        )
+      : [];
+
   const shown =
     tab === "search"
-      ? results
+      ? [...libMatches, ...results]
       : tab === "library"
         ? inLibrary
         : active
@@ -336,6 +376,42 @@ export default function Home() {
       <main className="mx-auto max-w-6xl px-4 py-5">
         {tab === "library" && (
           <DropZone onFiles={onFiles} importing={importing} />
+        )}
+
+        {tab === "library" && !!recent.length && (
+          <section className="mb-5">
+            <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-label-3">
+              Recently played
+            </h2>
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {recent.map((t, i) => (
+                <button
+                  key={t.id}
+                  onClick={() => play(recent, i)}
+                  title={`${t.title} — ${t.artist}`}
+                  className="w-24 shrink-0 text-left transition hover:opacity-80"
+                >
+                  {t.artwork ? (
+                    <img
+                      src={t.artwork}
+                      alt=""
+                      className="h-24 w-24 rounded-[10px] object-cover shadow-sm shadow-black/40"
+                    />
+                  ) : (
+                    <div className="grid h-24 w-24 place-items-center rounded-[10px] bg-fill text-label-3">
+                      <TbMusic size={24} />
+                    </div>
+                  )}
+                  <div className="mt-1.5 truncate text-xs font-medium">
+                    {t.title}
+                  </div>
+                  <div className="truncate text-[11px] text-label-2">
+                    {t.artist}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
         )}
 
         {tab === "library" && !!library.length && (
@@ -542,9 +618,13 @@ export default function Home() {
           />
         )}
 
-        {tab === "search" && searching && (
-          <p className="py-8 text-center text-sm text-label-2">Searching…</p>
-        )}
+        {tab === "search" &&
+          searching &&
+          (shown.length ? (
+            <p className="py-8 text-center text-sm text-label-2">Searching…</p>
+          ) : (
+            <SkeletonRows />
+          ))}
         {tab === "search" && searchError && (
           <p className="py-8 text-center text-sm text-accent">{searchError}</p>
         )}
@@ -581,6 +661,7 @@ export default function Home() {
               }}
               playlistNames={Object.keys(playlists)}
               onAdd={(name) => addTo(name, track)}
+              onQueue={(mode) => enqueue(track, mode)}
               onNewPlaylist={() => {
                 const name = window.prompt("Playlist name")?.trim();
                 if (name) updatePlaylists({ ...playlists, [name]: [track] });
@@ -621,7 +702,7 @@ export default function Home() {
       <Player
         queue={queue}
         index={qIndex}
-        setIndex={setQIndex}
+        setIndex={jumpTo}
         playing={playing}
         setPlaying={setPlaying}
       />
@@ -740,6 +821,23 @@ function ShortcutSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** What a result row will look like, while the search is still out. */
+function SkeletonRows() {
+  return (
+    <ul aria-hidden className="animate-pulse">
+      {Array.from({ length: 8 }, (_, i) => (
+        <li key={i} className="flex items-center gap-3 px-1 py-2">
+          <div className="h-11 w-11 shrink-0 rounded-[7px] bg-fill" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-3 w-1/3 rounded bg-fill" />
+            <div className="h-2.5 w-1/2 rounded bg-fill opacity-70" />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** The trailing clear affordance a search field grows once it has a value. */
 function ClearButton({
   label,
@@ -768,6 +866,7 @@ function Row({
   playlistNames,
   onAdd,
   onNewPlaylist,
+  onQueue,
   onRemove,
 }: {
   track: Track;
@@ -777,6 +876,7 @@ function Row({
   playlistNames: string[];
   onAdd: (name: string) => void;
   onNewPlaylist: () => void;
+  onQueue: (mode: "next" | "end") => void;
   onRemove?: () => void;
 }) {
   return (
@@ -845,21 +945,29 @@ function Row({
           value=""
           onChange={(e) => {
             const v = e.target.value;
-            if (v === "__new") onNewPlaylist();
+            if (v === "__next") onQueue("next");
+            else if (v === "__end") onQueue("end");
+            else if (v === "__new") onNewPlaylist();
             else if (v) onAdd(v);
             e.target.value = "";
           }}
-          aria-label="Add to playlist"
-          title="Add to playlist"
+          aria-label="Add to queue or playlist"
+          title="Add to queue or playlist"
           className="absolute inset-0 appearance-none rounded bg-transparent text-transparent opacity-0"
         >
-          <option value="">Add to playlist…</option>
-          {playlistNames.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-          <option value="__new">New playlist…</option>
+          <option value="">Add to…</option>
+          <optgroup label="Queue">
+            <option value="__next">Play next</option>
+            <option value="__end">Add to queue</option>
+          </optgroup>
+          <optgroup label="Playlists">
+            {playlistNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+            <option value="__new">New playlist…</option>
+          </optgroup>
         </select>
       </span>
 
