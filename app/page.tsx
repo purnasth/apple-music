@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Logo } from "@/components/Logo";
 import {
   TbArrowsShuffle,
   TbChevronDown,
@@ -362,7 +363,7 @@ export default function Home() {
       >
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
           <h1 className="flex shrink-0 items-center gap-1.5 text-base font-semibold tracking-tight">
-            <TbMusic className="text-accent" size={19} />
+            <Logo className="text-accent" size={20} />
             <span className="hidden sm:inline">Music</span>
           </h1>
 
