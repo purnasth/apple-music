@@ -19,7 +19,7 @@ import {
   TbUpload,
   TbX,
 } from "react-icons/tb";
-import { gooeyToast } from "goey-toast";
+import { toast } from "@/lib/toast";
 import {
   Track,
   Playlists,
@@ -558,7 +558,7 @@ function PlaylistDetail({
   const share = async () => {
     const sendable = shareable(tracks);
     if (!sendable.length)
-      return gooeyToast.warning("Nothing here can be shared", {
+      return toast.warning("Nothing here can be shared", {
         description: "Imported files stay on the device that imported them.",
       });
 
@@ -571,13 +571,13 @@ function PlaylistDetail({
       // The OS share sheet is its own confirmation; a toast on top would nag.
       if (navigator.share) return await navigator.share({ title: name, url });
       await navigator.clipboard.writeText(url);
-      gooeyToast.success("Link copied", {
+      toast.success("Link copied", {
         description: `Anyone who opens it gets all ${sendable.length} songs.${skipped}`,
       });
     } catch (e) {
       // A cancelled share sheet is not a failure worth reporting.
       if ((e as Error)?.name === "AbortError") return;
-      gooeyToast.error("Could not copy the link", {
+      toast.error("Could not copy the link", {
         description: "Clipboard access was refused.",
         action: { label: "Try again", onClick: share },
       });

@@ -19,7 +19,7 @@ import {
   TbUpload,
   TbX,
 } from "react-icons/tb";
-import { gooeyToast } from "goey-toast";
+import { toast } from "@/lib/toast";
 import Player from "@/components/Player";
 import {
   AddToSheet,
@@ -47,6 +47,14 @@ import {
   shuffled,
   artistsOf,
 } from "@/lib/music";
+
+/**
+ * Importing writes into *this browser's* IndexedDB, which is a thing worth
+ * doing on the machine that owns the music files and nothing but a confusing
+ * offer on the deployed site. `next dev` sets development; `next build` — and
+ * so every deploy — sets production, so there is no config to keep in sync.
+ */
+const DEV = process.env.NODE_ENV === "development";
 
 type Tab = "search" | "library" | "playlists";
 
@@ -131,12 +139,16 @@ export default function Home() {
         setShared({ ...p, shared: true });
         setSharedOpen(true);
         setTab("playlists");
-        gooeyToast.info(`“${p.name}” was shared with you`, {
+        toast.info(`“${p.name}” was shared with you`, {
+          // A stable id: StrictMode runs this effect twice in dev, and one
+          // greeting is the right number of greetings either way.
+          id: "shared-link",
           description: `${p.tracks.length} songs. Play it now, or save it to keep it.`,
         });
       } else {
         // A link truncated by a chat app used to land on an ordinary empty tab.
-        gooeyToast.error("That shared link could not be read", {
+        toast.error("That shared link could not be read", {
+          id: "shared-link",
           description: "It may have been cut short on its way here.",
         });
       }
@@ -157,7 +169,7 @@ export default function Home() {
     navigator.serviceWorker?.addEventListener(
       "controllerchange",
       () =>
-        gooeyToast.success("Ready to play offline", {
+        toast.success("Ready to play offline", {
           description: "Songs you play are kept on this device.",
         }),
       { once: true },
@@ -173,12 +185,12 @@ export default function Home() {
   // connection replaces the message rather than stacking it.
   useEffect(() => {
     const offline = () =>
-      gooeyToast.warning("You are offline", {
+      toast.warning("You are offline", {
         id: "connection",
         description: "Your library still plays. Search needs a connection.",
       });
     const online = () =>
-      gooeyToast.success("Back online", { id: "connection" });
+      toast.success("Back online", { id: "connection" });
     window.addEventListener("offline", offline);
     window.addEventListener("online", online);
     return () => {
@@ -258,7 +270,7 @@ export default function Home() {
   const playAll = (tracks: Track[], shuffle: boolean, what: string) => {
     if (!tracks.length) return;
     play(shuffle ? shuffled(tracks) : tracks, 0);
-    gooeyToast.success(shuffle ? `Shuffling ${what}` : `Playing ${what}`, {
+    toast.success(shuffle ? `Shuffling ${what}` : `Playing ${what}`, {
       id: "queue",
       description: `${tracks.length} song${tracks.length === 1 ? "" : "s"} queued.`,
     });
@@ -278,7 +290,7 @@ export default function Home() {
     q.splice(mode === "next" ? qIndex + 1 : q.length, 0, track);
     setQueue(q);
     // The sheet closes on these, so without this the queue changed invisibly.
-    gooeyToast.success(
+    toast.success(
       mode === "next" ? "Playing next" : "Added to the queue",
       { description: `${track.title} — ${track.artist}` },
     );
@@ -387,7 +399,7 @@ export default function Home() {
       ...playlists,
       [name]: had ? before.filter((t) => t.id !== track.id) : [...before, track],
     });
-    gooeyToast.success(had ? `Removed from “${name}”` : `Added to “${name}”`, {
+    toast.success(had ? `Removed from “${name}”` : `Added to “${name}”`, {
       description: `${track.title} — ${track.artist}`,
       action: undoable(name, before),
     });
@@ -409,7 +421,7 @@ export default function Home() {
   const createPlaylist = (want: string, seed: Track[] = []) => {
     const name = freeName(want);
     updatePlaylists({ ...playlists, [name]: seed });
-    gooeyToast.success(`Created “${name}”`, {
+    toast.success(`Created “${name}”`, {
       description:
         // Landing on "Drives (2)" unannounced reads as the app losing input.
         name !== want
@@ -423,7 +435,7 @@ export default function Home() {
   const renamePlaylist = (from: string, to: string) => {
     // Silently doing nothing was the old behaviour, and it read as a bug.
     if (playlists[to])
-      return gooeyToast.error(`There is already a playlist called “${to}”`, {
+      return toast.error(`There is already a playlist called “${to}”`, {
         description: "Pick another name.",
       });
     // Rebuilt in place rather than deleted and re-added, so it keeps its position.
@@ -431,7 +443,7 @@ export default function Home() {
     for (const [k, v] of Object.entries(playlists)) next[k === from ? to : k] = v;
     updatePlaylists(next);
     if (active === from) setActive(to);
-    gooeyToast.success(`Renamed to “${to}”`);
+    toast.success(`Renamed to “${to}”`);
   };
 
   const deletePlaylist = (name: string) => {
@@ -441,7 +453,7 @@ export default function Home() {
     if (active === name) setActive(null);
     // Undo rather than a confirm dialog: nothing is lost, and it costs no click
     // on the many deletions that were meant.
-    gooeyToast.success(`Deleted “${name}”`, {
+    toast.success(`Deleted “${name}”`, {
       description: `${removed.length} song${removed.length === 1 ? "" : "s"}.`,
       action: undoable(name, removed),
     });
@@ -456,7 +468,7 @@ export default function Home() {
     setActive(name);
     // The link has been spent; leave a clean URL behind.
     history.replaceState(null, "", location.pathname + location.search);
-    gooeyToast.success(`Saved “${name}” to your playlists`, {
+    toast.success(`Saved “${name}” to your playlists`, {
       description: "It lives in this browser now — the link is no longer needed.",
     });
   };
@@ -472,12 +484,12 @@ export default function Home() {
     try {
       if (navigator.share) return await navigator.share({ title: what, url });
       await navigator.clipboard.writeText(url);
-      gooeyToast.success("Link copied", {
+      toast.success("Link copied", {
         description: `Opens on ${what} — ${inLibrary.length} song${inLibrary.length === 1 ? "" : "s"}.`,
       });
     } catch (e) {
       if ((e as Error)?.name === "AbortError") return;
-      gooeyToast.error("Could not copy the link", {
+      toast.error("Could not copy the link", {
         description: "Clipboard access was refused.",
       });
     }
@@ -495,7 +507,7 @@ export default function Home() {
     a.click();
     URL.revokeObjectURL(a.href);
     const n = Object.keys(playlists).length;
-    gooeyToast.success(`Backed up ${n} playlist${n === 1 ? "" : "s"}`, {
+    toast.success(`Backed up ${n} playlist${n === 1 ? "" : "s"}`, {
       description: `${name} — keep it somewhere that syncs.`,
     });
   };
@@ -504,13 +516,13 @@ export default function Home() {
   const restore = async (file: File) => {
     const restored = await decodeBackup(await file.text(), library);
     if (!restored)
-      return gooeyToast.error("That is not a playlists backup", {
+      return toast.error("That is not a playlists backup", {
         description: `${file.name} could not be read.`,
       });
     const before = playlists;
     updatePlaylists({ ...playlists, ...restored });
     const n = Object.keys(restored).length;
-    gooeyToast.success(`Restored ${n} playlist${n === 1 ? "" : "s"}`, {
+    toast.success(`Restored ${n} playlist${n === 1 ? "" : "s"}`, {
       description: "Playlists of the same name were replaced.",
       action: { label: "Undo", onClick: () => updatePlaylists(before) },
     });
@@ -537,7 +549,7 @@ export default function Home() {
     );
     // Dropping a folder of photos used to do nothing at all, silently.
     if (!audio.length)
-      return gooeyToast.error("No audio in that drop", {
+      return toast.error("No audio in that drop", {
         description: "mp3, m4a, flac, wav, ogg, opus and aac are read.",
       });
     setImporting(`0 / ${audio.length}`);
@@ -547,7 +559,7 @@ export default function Home() {
       );
       setLibrary(await getLibrary());
       const ignored = files.length - audio.length;
-      gooeyToast.success(
+      toast.success(
         `Added ${added.length} song${added.length === 1 ? "" : "s"}`,
         {
           description: ignored
@@ -557,7 +569,7 @@ export default function Home() {
       );
     } catch (e) {
       // An unreadable file used to reject into nothing and lose the whole batch.
-      gooeyToast.error("Import failed", {
+      toast.error("Import failed", {
         description: e instanceof Error ? e.message : "Some files could not be read.",
       });
     } finally {
@@ -569,6 +581,7 @@ export default function Home() {
   // an overlay, and the drop lands in the library. Enter/leave nest through
   // child elements, so a depth counter decides when the drag truly left.
   useEffect(() => {
+    if (!DEV) return;
     let depth = 0;
     const hasFiles = (e: DragEvent) =>
       !!e.dataTransfer?.types.includes("Files");
@@ -738,7 +751,7 @@ export default function Home() {
         {/* The big dropzone is the empty library's call to action. Once songs
             exist it folds into a toolbar button, and dropping files anywhere
             on the page imports them (see the dragging overlay). */}
-        {tab === "library" && loaded && !library.length && (
+        {DEV && tab === "library" && loaded && !library.length && (
           <DropZone onFiles={onFiles} importing={importing} />
         )}
 
@@ -953,14 +966,14 @@ export default function Home() {
                 <button
                   onClick={shareView}
                   disabled={!inLibrary.length}
-                  aria-label="Share this selection"
                   title="Copy a link that opens on this selection"
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-fill text-label-2 transition hover:bg-fill-2 hover:text-label active:scale-[0.97] disabled:opacity-40"
+                  className="flex h-9 items-center gap-1.5 rounded-control bg-fill px-4 text-xs font-medium text-label transition hover:bg-fill-2 active:scale-[0.97] disabled:opacity-40"
                 >
-                  <TbShare3 size={15} />
+                  <TbShare3 size={13} />
+                  Share
                 </button>
               )}
-              <ImportButtons onFiles={onFiles} importing={importing} />
+              {DEV && <ImportButtons onFiles={onFiles} importing={importing} />}
             </div>
 
             {(!!needle || !!artist) && (
@@ -1023,7 +1036,9 @@ export default function Home() {
                 : tab === "library"
                   ? library.length
                     ? "No tracks match those filters."
-                    : "Your library is empty. Add audio files above."
+                    : DEV
+                      ? "Your library is empty. Add audio files above."
+                      : "The library is still loading."
                   : "This playlist is empty. Add tracks from search or your library."}
             </p>
           </div>
@@ -1048,7 +1063,7 @@ export default function Home() {
                       await removeTrack(track.id);
                       setLibrary(await getLibrary());
                       // No Undo here: removeTrack drops the audio blob itself.
-                      gooeyToast.success("Removed from your library", {
+                      toast.success("Removed from your library", {
                         description: `${track.title} — ${track.artist}`,
                       });
                     }
@@ -1060,7 +1075,7 @@ export default function Home() {
                           ...playlists,
                           [active]: before.filter((t) => t.id !== track.id),
                         });
-                        gooeyToast.success(`Removed from “${active}”`, {
+                        toast.success(`Removed from “${active}”`, {
                           description: `${track.title} — ${track.artist}`,
                           action: undoable(active, before),
                         });
@@ -1095,7 +1110,7 @@ export default function Home() {
       )}
 
       {/* pointer-events-none: the drop itself must fall through to the window. */}
-      {dragging && (
+      {DEV && dragging && (
         <div className="pointer-events-none fixed inset-0 z-[60] grid place-items-center bg-black/70 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3 rounded-sheet border-2 border-dashed border-accent px-12 py-10 text-center">
             <TbUpload className="text-accent" size={36} />

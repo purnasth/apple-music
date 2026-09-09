@@ -16,7 +16,7 @@ import {
   TbVolumeOff,
   TbX,
 } from "react-icons/tb";
-import { gooeyToast } from "goey-toast";
+import { toast } from "@/lib/toast";
 import {
   Track,
   audioSrc,
@@ -79,7 +79,7 @@ export default function Player({
    */
   const fail = (message: string) => {
     setError(message);
-    gooeyToast.error(message, {
+    toast.error(message, {
       id: "playback",
       description: track ? `${track.title} — ${track.artist}` : undefined,
     });
@@ -89,12 +89,12 @@ export default function Player({
       keystroke changes a state you may not be looking at. */
   const toggleShuffle = () => {
     setShuffle(!shuffle);
-    gooeyToast(shuffle ? "Shuffle off" : "Shuffle on", { id: "shuffle" });
+    toast(shuffle ? "Shuffle off" : "Shuffle on", { id: "shuffle" });
   };
 
   const toggleRepeat = () => {
     setRepeat(!repeat);
-    gooeyToast(repeat ? "Repeat off" : "Repeat on", {
+    toast(repeat ? "Repeat off" : "Repeat on", {
       id: "repeat",
       description: repeat ? undefined : "The queue starts over at the end.",
     });
