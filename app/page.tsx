@@ -15,11 +15,15 @@ import {
   TbPlus,
   TbKeyboard,
   TbSearch,
-  TbTrash,
   TbUpload,
   TbX,
 } from "react-icons/tb";
 import Player from "@/components/Player";
+import {
+  AddToSheet,
+  PlaylistsView,
+  type Detail,
+} from "@/components/Playlists";
 import { SHORTCUT_GROUPS } from "@/lib/shortcuts";
 import {
   Track,
@@ -27,6 +31,9 @@ import {
   search,
   importFiles,
   isPreview,
+  decodePlaylist,
+  encodeBackup,
+  decodeBackup,
   getLibrary,
   removeTrack,
   getPlaylists,
@@ -84,6 +91,10 @@ export default function Home() {
 
   const [playlists, setPlaylists] = useState<Playlists>({});
   const [active, setActive] = useState<string | null>(null);
+  // A playlist that arrived in a link — held aside until it is explicitly saved.
+  const [shared, setShared] = useState<Detail | null>(null);
+  const [sharedOpen, setSharedOpen] = useState(false);
+  const [addTo, setAddTo] = useState<Track | null>(null);
 
   const [queue, setQueue] = useState<Track[]>([]);
   const [qIndex, setQIndex] = useState(0);
@@ -96,7 +107,7 @@ export default function Home() {
   const searchBox = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getLibrary().then((lib) => {
+    getLibrary().then(async (lib) => {
       setLibrary(lib);
       setRecent(getRecent());
       // Bring back the last session's queue, paused where it left off.
@@ -105,8 +116,25 @@ export default function Home() {
         setQueue(s.queue);
         setQIndex(Math.min(s.index, s.queue.length - 1));
       }
+      // A shared link: #p=<gzipped playlist>. The library has to be in hand
+      // first, since bundled tracks travel as bare ids.
+      const code = location.hash.startsWith("#p=") ? location.hash.slice(3) : "";
+      const p = code && (await decodePlaylist(code, lib));
+      if (p && p.tracks.length) {
+        setShared({ ...p, shared: true });
+        setSharedOpen(true);
+        setTab("playlists");
+      }
     });
     setPlaylists(getPlaylists());
+    // Playlists and imported audio are only as durable as the browser's storage
+    // bucket, which Chrome may evict under disk pressure. This asks for the
+    // persistent bucket, which is exempt — granted silently on a site the user
+    // actually uses, so there is nothing to handle if it is refused.
+    navigator.storage
+      ?.persisted?.()
+      .then((ok) => ok || navigator.storage.persist())
+      .catch(() => {});
     // Streams, caches and range-serves the bundled songs — see public/sw.js.
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
   }, []);
@@ -216,13 +244,75 @@ export default function Home() {
     savePlaylists(next);
   };
 
-  const addTo = (name: string, track: Track) => {
-    if (playlists[name]?.some((t) => t.id === track.id)) return;
+  /** The sheet stays open while you tick playlists, so a second tap takes it back out. */
+  const togglePlaylist = (name: string, track: Track) => {
+    const list = playlists[name] ?? [];
     updatePlaylists({
       ...playlists,
-      [name]: [...(playlists[name] ?? []), track],
+      [name]: list.some((t) => t.id === track.id)
+        ? list.filter((t) => t.id !== track.id)
+        : [...list, track],
     });
   };
+
+  /** Names are the key, so a new one has to be free before it can be taken. */
+  const freeName = (want: string) => {
+    let name = want;
+    for (let i = 2; playlists[name]; i++) name = `${want} (${i})`;
+    return name;
+  };
+
+  const renamePlaylist = (from: string, to: string) => {
+    if (playlists[to]) return;
+    // Rebuilt in place rather than deleted and re-added, so it keeps its position.
+    const next: Playlists = {};
+    for (const [k, v] of Object.entries(playlists)) next[k === from ? to : k] = v;
+    updatePlaylists(next);
+    if (active === from) setActive(to);
+  };
+
+  const saveShared = () => {
+    if (!shared) return;
+    const name = freeName(shared.name);
+    updatePlaylists({ ...playlists, [name]: shared.tracks });
+    setShared(null);
+    setSharedOpen(false);
+    setActive(name);
+    // The link has been spent; leave a clean URL behind.
+    history.replaceState(null, "", location.pathname + location.search);
+  };
+
+  /** A file the listener keeps — the one copy that outlives this browser profile. */
+  const backup = async () => {
+    const blob = new Blob([await encodeBackup(playlists)], {
+      type: "application/json",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `music-playlists-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  /** Same-named playlists are replaced, anything else here is left alone. */
+  const restore = async (file: File) => {
+    const restored = await decodeBackup(await file.text(), library);
+    if (!restored) return alert("That does not look like a playlists backup.");
+    updatePlaylists({ ...playlists, ...restored });
+  };
+
+  const openDetail = (d: Detail | null) => {
+    setSharedOpen(!!d?.shared);
+    setActive(d && !d.shared ? d.name : null);
+  };
+
+  // Derived, not stored, so the open playlist tracks its own edits.
+  const detail: Detail | null =
+    sharedOpen && shared
+      ? shared
+      : active && playlists[active]
+        ? { name: active, tracks: playlists[active] }
+        : null;
 
   const onFiles = useCallback(async (files: File[]) => {
     const audio = files.filter(
@@ -350,9 +440,7 @@ export default function Home() {
       ? [...libMatches, ...results]
       : tab === "library"
         ? inLibrary
-        : active
-          ? (playlists[active] ?? [])
-          : [];
+        : (detail?.tracks ?? []);
 
   return (
     <div className="min-h-dvh bg-canvas pb-40 text-label sm:pb-28">
@@ -648,16 +736,26 @@ export default function Home() {
         )}
 
         {tab === "playlists" && (
-          <PlaylistBar
+          <PlaylistsView
             playlists={playlists}
-            active={active}
-            setActive={setActive}
-            onCreate={(name) => updatePlaylists({ ...playlists, [name]: [] })}
+            shared={shared}
+            detail={detail}
+            open={openDetail}
+            onCreate={(name) =>
+              updatePlaylists({ ...playlists, [freeName(name)]: [] })
+            }
+            onRename={renamePlaylist}
             onDelete={(name) => {
               const { [name]: _, ...rest } = playlists;
               updatePlaylists(rest);
               if (active === name) setActive(null);
             }}
+            onSaveShared={saveShared}
+            onBackup={backup}
+            onRestore={restore}
+            onPlay={(tracks, shuffle) =>
+              tracks.length && play(shuffle ? shuffled(tracks) : tracks, 0)
+            }
           />
         )}
 
@@ -672,7 +770,9 @@ export default function Home() {
           <p className="py-8 text-center text-sm text-accent">{searchError}</p>
         )}
 
-        {!shown.length && !searching && (
+        {/* The playlists grid carries its own empty state, so this one is only for
+            an open playlist that has nothing in it yet. */}
+        {!shown.length && !searching && (tab !== "playlists" || detail) && (
           <div className="flex flex-col items-center gap-2.5 py-16 text-center">
             <TbMusic className="text-label-3" size={32} />
             <p className="max-w-xs text-sm text-label-2">
@@ -684,9 +784,7 @@ export default function Home() {
                   ? library.length
                     ? "No tracks match those filters."
                     : "Your library is empty. Add audio files above."
-                  : active
-                    ? "This playlist is empty. Add tracks from search or your library."
-                    : "Create a playlist to get started."}
+                  : "This playlist is empty. Add tracks from search or your library."}
             </p>
           </div>
         )}
@@ -702,13 +800,7 @@ export default function Home() {
                 if (queue[qIndex]?.id === track.id) setPlaying(!playing);
                 else play(shown, i);
               }}
-              playlistNames={Object.keys(playlists)}
-              onAdd={(name) => addTo(name, track)}
-              onQueue={(mode) => enqueue(track, mode)}
-              onNewPlaylist={() => {
-                const name = window.prompt("Playlist name")?.trim();
-                if (name) updatePlaylists({ ...playlists, [name]: [track] });
-              }}
+              onAddTo={() => setAddTo(track)}
               onRemove={
                 // Bundled tracks ship with the site; removeTrack can't evict one, it would just reappear.
                 tab === "library" && !track.id.startsWith("file:")
@@ -716,7 +808,8 @@ export default function Home() {
                       await removeTrack(track.id);
                       setLibrary(await getLibrary());
                     }
-                  : tab === "playlists" && active
+                  : // A shared playlist is someone else's; it is saved before it is edited.
+                    tab === "playlists" && active && playlists[active]
                     ? () =>
                         updatePlaylists({
                           ...playlists,
@@ -741,6 +834,19 @@ export default function Home() {
       </button>
 
       {showKeys && <ShortcutSheet onClose={() => setShowKeys(false)} />}
+
+      {addTo && (
+        <AddToSheet
+          track={addTo}
+          playlists={playlists}
+          onToggle={(name) => togglePlaylist(name, addTo)}
+          onCreate={(name) =>
+            updatePlaylists({ ...playlists, [freeName(name)]: [addTo] })
+          }
+          onQueue={(mode) => enqueue(addTo, mode)}
+          onClose={() => setAddTo(null)}
+        />
+      )}
 
       {/* pointer-events-none: the drop itself must fall through to the window. */}
       {dragging && (
@@ -918,20 +1024,14 @@ function Row({
   active,
   playing,
   onPlay,
-  playlistNames,
-  onAdd,
-  onNewPlaylist,
-  onQueue,
+  onAddTo,
   onRemove,
 }: {
   track: Track;
   active: boolean;
   playing: boolean;
   onPlay: () => void;
-  playlistNames: string[];
-  onAdd: (name: string) => void;
-  onNewPlaylist: () => void;
-  onQueue: (mode: "next" | "end") => void;
+  onAddTo: () => void;
   onRemove?: () => void;
 }) {
   return (
@@ -995,37 +1095,14 @@ function Row({
         </span>
       )}
 
-      <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-label-3 transition hover:bg-fill-2 hover:text-label">
+      <button
+        onClick={onAddTo}
+        aria-label={`Add ${track.title} to a playlist or the queue`}
+        title="Add to playlist or queue"
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-label-3 transition hover:bg-fill-2 hover:text-label"
+      >
         <TbPlus size={16} />
-        <select
-          value=""
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "__next") onQueue("next");
-            else if (v === "__end") onQueue("end");
-            else if (v === "__new") onNewPlaylist();
-            else if (v) onAdd(v);
-            e.target.value = "";
-          }}
-          aria-label="Add to queue or playlist"
-          title="Add to queue or playlist"
-          className="absolute inset-0 appearance-none rounded bg-transparent text-transparent opacity-0"
-        >
-          <option value="">Add to…</option>
-          <optgroup label="Queue">
-            <option value="__next">Play next</option>
-            <option value="__end">Add to queue</option>
-          </optgroup>
-          <optgroup label="Playlists">
-            {playlistNames.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-            <option value="__new">New playlist…</option>
-          </optgroup>
-        </select>
-      </span>
+      </button>
 
       {track.appleUrl && (
         <a
@@ -1169,75 +1246,6 @@ function DropZone({
           </button>
         </>
       )}
-    </div>
-  );
-}
-
-function PlaylistBar({
-  playlists,
-  active,
-  setActive,
-  onCreate,
-  onDelete,
-}: {
-  playlists: Playlists;
-  active: string | null;
-  setActive: (n: string | null) => void;
-  onCreate: (name: string) => void;
-  onDelete: (name: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const names = Object.keys(playlists);
-
-  return (
-    <div className="mb-6 space-y-3">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          const n = name.trim();
-          if (n && !playlists[n]) {
-            onCreate(n);
-            setActive(n);
-          }
-          setName("");
-        }}
-        className="flex gap-2"
-      >
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="New playlist name"
-          className="h-9 min-w-0 flex-1 rounded-control bg-fill px-3 text-sm outline-none transition placeholder:text-label-3 focus:bg-fill-2"
-        />
-        <button className="flex h-9 shrink-0 items-center gap-1.5 rounded-control bg-accent px-4 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.97]">
-          <TbPlus size={15} />
-          Create
-        </button>
-      </form>
-
-      <div className="flex flex-wrap gap-2">
-        {names.map((n) => (
-          <span
-            key={n}
-            className={`flex h-8 items-center gap-1 rounded-full pl-3 pr-1 text-xs font-medium transition ${
-              active === n
-                ? "bg-accent text-white"
-                : "bg-fill text-label-2 hover:bg-fill-2 hover:text-label"
-            }`}
-          >
-            <button onClick={() => setActive(n)} className="py-2">
-              {n} ({playlists[n].length})
-            </button>
-            <button
-              onClick={() => onDelete(n)}
-              aria-label={`Delete ${n}`}
-              className="grid h-6 w-6 place-items-center rounded-full opacity-60 transition hover:bg-black/20 hover:opacity-100"
-            >
-              <TbTrash size={13} />
-            </button>
-          </span>
-        ))}
-      </div>
     </div>
   );
 }
