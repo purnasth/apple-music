@@ -15,6 +15,7 @@ import {
   TbPlus,
   TbKeyboard,
   TbSearch,
+  TbShare3,
   TbUpload,
   TbX,
 } from "react-icons/tb";
@@ -73,7 +74,7 @@ const SORTS: Record<SortKey, (a: Track, b: Track) => number> = {
 };
 
 export default function Home() {
-  const [tab, setTab] = useState<Tab>("search");
+  const [tab, setTab] = useState<Tab>("library");
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
@@ -81,6 +82,9 @@ export default function Home() {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   const [library, setLibrary] = useState<Track[]>([]);
+  // The library tab is the landing tab now, and songs.json takes a moment —
+  // without this the empty-library dropzone flashes on every load.
+  const [loaded, setLoaded] = useState(false);
   const [importing, setImporting] = useState<string | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
   const [artist, setArtist] = useState<string>("");
@@ -110,6 +114,7 @@ export default function Home() {
   useEffect(() => {
     getLibrary().then(async (lib) => {
       setLibrary(lib);
+      setLoaded(true);
       setRecent(getRecent());
       // Bring back the last session's queue, paused where it left off.
       const s = getSession();
@@ -279,8 +284,68 @@ export default function Home() {
     );
   };
 
-  // A folder change can strand an artist selection that folder has no tracks for.
-  useEffect(() => setArtist(""), [folder]);
+  /* ---------- The library view lives in the URL ----------
+     Filters are a selection, and a selection you cannot link to is a selection
+     you cannot show anyone. Query string rather than the fragment, which the
+     shared-playlist links already own. */
+
+  // Read once, before anything can write. Prerendered HTML has no params in it,
+  // so this has to be an effect rather than a useState initialiser — reading
+  // location during the first render would not match what the server built.
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    const cap = (k: string) => p.get(k)?.slice(0, 80) || "";
+    const [a, f, q] = [cap("artist"), cap("folder"), cap("q")];
+    if (!a && !f && !q) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- the URL is an external
+       source that can only be read after hydration. A lazy state initialiser
+       would read it during the first render and not match the prerendered
+       HTML, which is what a static export ships. */
+    setArtist(a);
+    setFolder(f || null);
+    setFilter(q);
+    setTab("library");
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  // Skips its first run so the params just read are not immediately erased by
+  // the defaults they replaced.
+  const urlWritten = useRef(false);
+  useEffect(() => {
+    if (!urlWritten.current) return void (urlWritten.current = true);
+    const p = new URLSearchParams();
+    if (folder) p.set("folder", folder);
+    if (artist) p.set("artist", artist);
+    if (filter.trim()) p.set("q", filter.trim());
+    const qs = p.toString();
+    // replaceState, not push: a filter typed letter by letter must not become
+    // twelve entries in the back button. Safari throttles these by count, and a
+    // held-down backspace is the one way to reach the limit — the URL falling
+    // behind is not worth taking the page down over.
+    try {
+      history.replaceState(
+        null,
+        "",
+        `${location.pathname}${qs ? `?${qs}` : ""}${location.hash}`,
+      );
+    } catch {}
+  }, [folder, artist, filter]);
+
+  // A folder change can strand an artist that folder has no tracks for — but
+  // only then. Clearing unconditionally also wiped an artist restored from a link.
+  useEffect(() => {
+    if (!library.length) return;
+    // A folder named in a link that this library has never heard of would
+    // otherwise show an empty list with no chip lit to explain it.
+    if (folder && !library.some((t) => t.folder === folder)) return setFolder(null);
+    if (!artist) return;
+    const here = library.filter((t) => !folder || t.folder === folder);
+    const has = here.some((t) =>
+      artistsOf(t.artist).some((a) => a.toLowerCase() === artist.toLowerCase()),
+    );
+    if (!has) setArtist("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folder, library]);
 
   // Dismiss the artist popup on an outside click or Escape, the way a menu should behave.
   useEffect(() => {
@@ -394,6 +459,28 @@ export default function Home() {
     gooeyToast.success(`Saved “${name}” to your playlists`, {
       description: "It lives in this browser now — the link is no longer needed.",
     });
+  };
+
+  /**
+   * Shares the library view itself, not a copy of the songs in it. The URL
+   * already carries the filter, so the link stays short and stays live: add
+   * another Foeseal track tomorrow and the same link shows it.
+   */
+  const shareView = async () => {
+    const url = location.href;
+    const what = artist || folder || "your library";
+    try {
+      if (navigator.share) return await navigator.share({ title: what, url });
+      await navigator.clipboard.writeText(url);
+      gooeyToast.success("Link copied", {
+        description: `Opens on ${what} — ${inLibrary.length} song${inLibrary.length === 1 ? "" : "s"}.`,
+      });
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") return;
+      gooeyToast.error("Could not copy the link", {
+        description: "Clipboard access was refused.",
+      });
+    }
   };
 
   /** A file the listener keeps — the one copy that outlives this browser profile. */
@@ -651,7 +738,7 @@ export default function Home() {
         {/* The big dropzone is the empty library's call to action. Once songs
             exist it folds into a toolbar button, and dropping files anywhere
             on the page imports them (see the dragging overlay). */}
-        {tab === "library" && !library.length && (
+        {tab === "library" && loaded && !library.length && (
           <DropZone onFiles={onFiles} importing={importing} />
         )}
 
@@ -860,6 +947,19 @@ export default function Home() {
                 <TbArrowsShuffle size={13} />
                 Shuffle
               </button>
+              {/* Only once something is actually selected — a link to the
+                  unfiltered library is just the site. */}
+              {(!!artist || !!folder || !!needle) && (
+                <button
+                  onClick={shareView}
+                  disabled={!inLibrary.length}
+                  aria-label="Share this selection"
+                  title="Copy a link that opens on this selection"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-fill text-label-2 transition hover:bg-fill-2 hover:text-label active:scale-[0.97] disabled:opacity-40"
+                >
+                  <TbShare3 size={15} />
+                </button>
+              )}
               <ImportButtons onFiles={onFiles} importing={importing} />
             </div>
 
