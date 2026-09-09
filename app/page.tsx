@@ -49,12 +49,15 @@ import {
 } from "@/lib/music";
 
 /**
- * Importing writes into *this browser's* IndexedDB, which is a thing worth
- * doing on the machine that owns the music files and nothing but a confusing
- * offer on the deployed site. `next dev` sets development; `next build` — and
- * so every deploy — sets production, so there is no config to keep in sync.
+ * Importing writes into *this browser's* IndexedDB, which is worth doing on the
+ * machine that owns the music files and nothing but a confusing offer on the
+ * deployed site. NEXT_PUBLIC_ENV=local turns it on; anything else, unset
+ * included, leaves it off, so forgetting the file fails safe. See .env.example.
+ *
+ * NEXT_PUBLIC_* is inlined at build time, so this folds to a literal and the
+ * import code is dropped from the deployed bundle rather than hidden inside it.
  */
-const DEV = process.env.NODE_ENV === "development";
+const CAN_IMPORT = process.env.NEXT_PUBLIC_ENV === "local";
 
 type Tab = "search" | "library" | "playlists";
 
@@ -581,7 +584,7 @@ export default function Home() {
   // an overlay, and the drop lands in the library. Enter/leave nest through
   // child elements, so a depth counter decides when the drag truly left.
   useEffect(() => {
-    if (!DEV) return;
+    if (!CAN_IMPORT) return;
     let depth = 0;
     const hasFiles = (e: DragEvent) =>
       !!e.dataTransfer?.types.includes("Files");
@@ -751,7 +754,7 @@ export default function Home() {
         {/* The big dropzone is the empty library's call to action. Once songs
             exist it folds into a toolbar button, and dropping files anywhere
             on the page imports them (see the dragging overlay). */}
-        {DEV && tab === "library" && loaded && !library.length && (
+        {CAN_IMPORT && tab === "library" && loaded && !library.length && (
           <DropZone onFiles={onFiles} importing={importing} />
         )}
 
@@ -973,7 +976,7 @@ export default function Home() {
                   Share
                 </button>
               )}
-              {DEV && <ImportButtons onFiles={onFiles} importing={importing} />}
+              {CAN_IMPORT && <ImportButtons onFiles={onFiles} importing={importing} />}
             </div>
 
             {(!!needle || !!artist) && (
@@ -1036,7 +1039,7 @@ export default function Home() {
                 : tab === "library"
                   ? library.length
                     ? "No tracks match those filters."
-                    : DEV
+                    : CAN_IMPORT
                       ? "Your library is empty. Add audio files above."
                       : "The library is still loading."
                   : "This playlist is empty. Add tracks from search or your library."}
@@ -1110,7 +1113,7 @@ export default function Home() {
       )}
 
       {/* pointer-events-none: the drop itself must fall through to the window. */}
-      {DEV && dragging && (
+      {CAN_IMPORT && dragging && (
         <div className="pointer-events-none fixed inset-0 z-[60] grid place-items-center bg-black/70 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3 rounded-sheet border-2 border-dashed border-accent px-12 py-10 text-center">
             <TbUpload className="text-accent" size={36} />

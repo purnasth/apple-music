@@ -28,6 +28,15 @@ import {
   shareable,
 } from "@/lib/music";
 
+/**
+ * Backing up reads and Restore writes this browser's own playlists, the same
+ * local-machine business as importing audio — so it rides the same flag. Written
+ * out literally rather than imported from the page: a module-level const folds
+ * to a boolean at build time and takes the dead branch with it, which an
+ * imported one is not guaranteed to do. See .env.example.
+ */
+const CAN_IMPORT = process.env.NEXT_PUBLIC_ENV === "local";
+
 /** What the playlists tab is looking at: a saved playlist, or one from a link. */
 export type Detail = { name: string; tracks: Track[]; shared?: boolean };
 
@@ -341,11 +350,13 @@ export function PlaylistsView({
           Playlists
         </h2>
         <div className="flex min-w-0 items-center gap-2">
-          <Backup
-            onBackup={onBackup}
-            onRestore={onRestore}
-            disabled={!names.length}
-          />
+          {CAN_IMPORT && (
+            <Backup
+              onBackup={onBackup}
+              onRestore={onRestore}
+              disabled={!names.length}
+            />
+          )}
           <NewPlaylist onCreate={onCreate} />
         </div>
       </div>
