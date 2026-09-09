@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import {
   TbArrowsShuffle,
@@ -693,17 +694,29 @@ export default function Home() {
         ? inLibrary
         : (detail?.tracks ?? []);
 
+  /** Nothing to list, so the message stands in for the list and takes its room.
+      The playlists grid carries its own empty state, hence the detail check. */
+  const showEmpty =
+    !shown.length && !searching && (tab !== "playlists" || !!detail);
+
   return (
-    <div className="min-h-dvh bg-canvas pb-40 text-label sm:pb-28">
+    <div className="flex min-h-dvh flex-col bg-canvas pb-40 text-label sm:pb-28">
       <header
         className={`glass sticky top-0 z-30 border-b transition-colors ${
           scrolled ? "border-separator" : "border-transparent"
         }`}
       >
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
-          <h1 className="flex shrink-0 items-center gap-1.5 text-base font-semibold tracking-tight">
-            <Logo className="text-accent" size={20} />
-            <span className="hidden sm:inline">Music</span>
+          {/* Home, the way a logo goes home. The brand page is the colophon's job. */}
+          <h1 className="flex shrink-0 items-center text-base font-semibold tracking-tight">
+            <Link
+              href="/"
+              aria-label="Music — home"
+              className="flex items-center gap-1.5 transition-colors hover:text-accent"
+            >
+              <Logo className="text-accent" size={20} />
+              <span className="hidden sm:inline">Music</span>
+            </Link>
           </h1>
 
           <div className="relative min-w-0 flex-1">
@@ -750,7 +763,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-5">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-5">
         {/* The big dropzone is the empty library's call to action. Once songs
             exist it folds into a toolbar button, and dropping files anywhere
             on the page imports them (see the dragging overlay). */}
@@ -1028,8 +1041,8 @@ export default function Home() {
 
         {/* The playlists grid carries its own empty state, so this one is only for
             an open playlist that has nothing in it yet. */}
-        {!shown.length && !searching && (tab !== "playlists" || detail) && (
-          <div className="flex flex-col items-center gap-2.5 py-16 text-center">
+        {showEmpty && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2.5 py-16 text-center">
             <TbMusic className="text-label-3" size={32} />
             <p className="max-w-xs text-sm text-label-2">
               {tab === "search"
@@ -1088,6 +1101,25 @@ export default function Home() {
             />
           ))}
         </ul>
+
+        {/* The colophon lives on Search alone. On Library and Playlists it read
+            as a footer demanding to be noticed under every short list; here the
+            screen is quiet enough to carry it. */}
+        {tab === "search" && (
+          <>
+            {/* Only when nothing else is already growing: with the empty state
+                on screen the two would split the space and centre nothing. */}
+            {!showEmpty && <div className="flex-1" aria-hidden />}
+            <footer className="mt-12 border-t border-separator pt-6 text-center">
+              <Link
+                href="/brand"
+                className="text-xxs font-medium uppercase tracking-widest text-label-3 underline-offset-4 transition-colors hover:text-label hover:underline"
+              >
+                Music by Purna — the mark, the type and the colour
+              </Link>
+            </footer>
+          </>
+        )}
       </main>
 
       <button

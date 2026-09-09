@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import { TRACKS } from "@/lib/brand";
 
@@ -50,7 +51,16 @@ export function BrandNav() {
         aria-hidden
       />
       <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2.5">
-        <Logo className="shrink-0 text-accent" size={20} />
+        {/* Same door, other side: the mark returns to the app. Until now this
+            page had no way back at all. */}
+        <Link
+          href="/"
+          aria-label="Back to Music"
+          title="Back to Music"
+          className="shrink-0 transition-opacity hover:opacity-70"
+        >
+          <Logo className="text-accent" size={20} />
+        </Link>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{TRACKS[index]?.[1]}</p>
           <p className="text-xxs uppercase tracking-widest text-label-3">
