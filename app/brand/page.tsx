@@ -4,7 +4,7 @@ import { TRACKS } from "@/lib/brand";
 import { Logo } from "@/components/Logo";
 
 export const metadata: Metadata = {
-  title: "Brand — Music",
+  title: "Brand",
   description:
     "The identity behind Music by Purna: one word, one moon, one colour.",
   // Deliberately unlisted: reachable by URL, never by search or the app's own chrome.
