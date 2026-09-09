@@ -23,6 +23,17 @@ it is the only place the songs exist.
 Tags are read from the files themselves, so nothing needs renaming. Only changed
 files upload — wrangler skips assets already on the edge by content hash.
 
+Note that the in-browser import controls — the Import button, the folder picker,
+the dropzone and the drag-anywhere target — are not on the deployed site. They
+write into whichever browser is looking at the page, which is useful here and
+meaningless to a visitor. `NEXT_PUBLIC_ENV` decides: `local` shows them,
+anything else hides them, and `npm run deploy` sets `production` itself so a
+stray `.env.local` cannot ship them. Being set at build time it folds to a
+literal, so the code is dropped from the bundle rather than hidden inside it.
+
+A fresh clone needs `cp .env.example .env.local` to get the import controls in
+`npm run dev`. Adding songs goes through `public/songs/` above.
+
 ## Why deploys are manual
 
 Cloudflare Builds deploys on every push to `main`, but it builds from the git

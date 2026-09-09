@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import {
   TbArrowsShuffle,
@@ -15,11 +16,17 @@ import {
   TbPlus,
   TbKeyboard,
   TbSearch,
-  TbTrash,
+  TbShare3,
   TbUpload,
   TbX,
 } from "react-icons/tb";
+import { toast } from "@/lib/toast";
 import Player from "@/components/Player";
+import {
+  AddToSheet,
+  PlaylistsView,
+  type Detail,
+} from "@/components/Playlists";
 import { SHORTCUT_GROUPS } from "@/lib/shortcuts";
 import {
   Track,
@@ -27,6 +34,9 @@ import {
   search,
   importFiles,
   isPreview,
+  decodePlaylist,
+  encodeBackup,
+  decodeBackup,
   getLibrary,
   removeTrack,
   getPlaylists,
@@ -38,6 +48,17 @@ import {
   shuffled,
   artistsOf,
 } from "@/lib/music";
+
+/**
+ * Importing writes into *this browser's* IndexedDB, which is worth doing on the
+ * machine that owns the music files and nothing but a confusing offer on the
+ * deployed site. NEXT_PUBLIC_ENV=local turns it on; anything else, unset
+ * included, leaves it off, so forgetting the file fails safe. See .env.example.
+ *
+ * NEXT_PUBLIC_* is inlined at build time, so this folds to a literal and the
+ * import code is dropped from the deployed bundle rather than hidden inside it.
+ */
+const CAN_IMPORT = process.env.NEXT_PUBLIC_ENV === "local";
 
 type Tab = "search" | "library" | "playlists";
 
@@ -65,7 +86,7 @@ const SORTS: Record<SortKey, (a: Track, b: Track) => number> = {
 };
 
 export default function Home() {
-  const [tab, setTab] = useState<Tab>("search");
+  const [tab, setTab] = useState<Tab>("library");
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
@@ -73,6 +94,9 @@ export default function Home() {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   const [library, setLibrary] = useState<Track[]>([]);
+  // The library tab is the landing tab now, and songs.json takes a moment —
+  // without this the empty-library dropzone flashes on every load.
+  const [loaded, setLoaded] = useState(false);
   const [importing, setImporting] = useState<string | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
   const [artist, setArtist] = useState<string>("");
@@ -84,6 +108,10 @@ export default function Home() {
 
   const [playlists, setPlaylists] = useState<Playlists>({});
   const [active, setActive] = useState<string | null>(null);
+  // A playlist that arrived in a link — held aside until it is explicitly saved.
+  const [shared, setShared] = useState<Detail | null>(null);
+  const [sharedOpen, setSharedOpen] = useState(false);
+  const [addTo, setAddTo] = useState<Track | null>(null);
 
   const [queue, setQueue] = useState<Track[]>([]);
   const [qIndex, setQIndex] = useState(0);
@@ -96,8 +124,9 @@ export default function Home() {
   const searchBox = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getLibrary().then((lib) => {
+    getLibrary().then(async (lib) => {
       setLibrary(lib);
+      setLoaded(true);
       setRecent(getRecent());
       // Bring back the last session's queue, paused where it left off.
       const s = getSession();
@@ -105,15 +134,74 @@ export default function Home() {
         setQueue(s.queue);
         setQIndex(Math.min(s.index, s.queue.length - 1));
       }
+      // A shared link: #p=<gzipped playlist>. The library has to be in hand
+      // first, since bundled tracks travel as bare ids.
+      const code = location.hash.startsWith("#p=") ? location.hash.slice(3) : "";
+      if (!code) return;
+      const p = await decodePlaylist(code, lib);
+      if (p && p.tracks.length) {
+        setShared({ ...p, shared: true });
+        setSharedOpen(true);
+        setTab("playlists");
+        toast.info(`“${p.name}” was shared with you`, {
+          // A stable id: StrictMode runs this effect twice in dev, and one
+          // greeting is the right number of greetings either way.
+          id: "shared-link",
+          description: `${p.tracks.length} songs. Play it now, or save it to keep it.`,
+        });
+      } else {
+        // A link truncated by a chat app used to land on an ordinary empty tab.
+        toast.error("That shared link could not be read", {
+          id: "shared-link",
+          description: "It may have been cut short on its way here.",
+        });
+      }
     });
     setPlaylists(getPlaylists());
+    // Playlists and imported audio are only as durable as the browser's storage
+    // bucket, which Chrome may evict under disk pressure. This asks for the
+    // persistent bucket, which is exempt — granted silently on a site the user
+    // actually uses, so there is nothing to handle if it is refused.
+    navigator.storage
+      ?.persisted?.()
+      .then((ok) => ok || navigator.storage.persist())
+      .catch(() => {});
     // Streams, caches and range-serves the bundled songs — see public/sw.js.
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
+    // sw.js claims its clients on activate, so this fires exactly once: on the
+    // visit that installs it. Later visits arrive already controlled and stay quiet.
+    navigator.serviceWorker?.addEventListener(
+      "controllerchange",
+      () =>
+        toast.success("Ready to play offline", {
+          description: "Songs you play are kept on this device.",
+        }),
+      { once: true },
+    );
   }, []);
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [tab]);
+
+  // Half this app works without a connection and half does not, which is worth
+  // saying before a search comes back empty and looks broken. One id, so a flaky
+  // connection replaces the message rather than stacking it.
+  useEffect(() => {
+    const offline = () =>
+      toast.warning("You are offline", {
+        id: "connection",
+        description: "Your library still plays. Search needs a connection.",
+      });
+    const online = () =>
+      toast.success("Back online", { id: "connection" });
+    window.addEventListener("offline", offline);
+    window.addEventListener("online", online);
+    return () => {
+      window.removeEventListener("offline", offline);
+      window.removeEventListener("online", online);
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -178,6 +266,20 @@ export default function Home() {
     setRecent(pushRecent(tracks[i]));
   };
 
+  /**
+   * The bulk Play and Shuffle buttons, which replace the whole queue. A single
+   * row click does not come through here — starting one song is self-evident,
+   * and it happens far too often to narrate.
+   */
+  const playAll = (tracks: Track[], shuffle: boolean, what: string) => {
+    if (!tracks.length) return;
+    play(shuffle ? shuffled(tracks) : tracks, 0);
+    toast.success(shuffle ? `Shuffling ${what}` : `Playing ${what}`, {
+      id: "queue",
+      description: `${tracks.length} song${tracks.length === 1 ? "" : "s"} queued.`,
+    });
+  };
+
   /** Every index move (skip, auto-advance, queue click) lands here, so it can log history. */
   const jumpTo = (i: number) => {
     setQIndex(i);
@@ -186,14 +288,80 @@ export default function Home() {
 
   /** Insert into the live queue — right after the current track, or at the end. */
   const enqueue = (track: Track, mode: "next" | "end") => {
+    // An empty queue just starts playing, which is its own feedback.
     if (!queue.length) return play([track], 0);
     const q = [...queue];
     q.splice(mode === "next" ? qIndex + 1 : q.length, 0, track);
     setQueue(q);
+    // The sheet closes on these, so without this the queue changed invisibly.
+    toast.success(
+      mode === "next" ? "Playing next" : "Added to the queue",
+      { description: `${track.title} — ${track.artist}` },
+    );
   };
 
-  // A folder change can strand an artist selection that folder has no tracks for.
-  useEffect(() => setArtist(""), [folder]);
+  /* ---------- The library view lives in the URL ----------
+     Filters are a selection, and a selection you cannot link to is a selection
+     you cannot show anyone. Query string rather than the fragment, which the
+     shared-playlist links already own. */
+
+  // Read once, before anything can write. Prerendered HTML has no params in it,
+  // so this has to be an effect rather than a useState initialiser — reading
+  // location during the first render would not match what the server built.
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    const cap = (k: string) => p.get(k)?.slice(0, 80) || "";
+    const [a, f, q] = [cap("artist"), cap("folder"), cap("q")];
+    if (!a && !f && !q) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- the URL is an external
+       source that can only be read after hydration. A lazy state initialiser
+       would read it during the first render and not match the prerendered
+       HTML, which is what a static export ships. */
+    setArtist(a);
+    setFolder(f || null);
+    setFilter(q);
+    setTab("library");
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  // Skips its first run so the params just read are not immediately erased by
+  // the defaults they replaced.
+  const urlWritten = useRef(false);
+  useEffect(() => {
+    if (!urlWritten.current) return void (urlWritten.current = true);
+    const p = new URLSearchParams();
+    if (folder) p.set("folder", folder);
+    if (artist) p.set("artist", artist);
+    if (filter.trim()) p.set("q", filter.trim());
+    const qs = p.toString();
+    // replaceState, not push: a filter typed letter by letter must not become
+    // twelve entries in the back button. Safari throttles these by count, and a
+    // held-down backspace is the one way to reach the limit — the URL falling
+    // behind is not worth taking the page down over.
+    try {
+      history.replaceState(
+        null,
+        "",
+        `${location.pathname}${qs ? `?${qs}` : ""}${location.hash}`,
+      );
+    } catch {}
+  }, [folder, artist, filter]);
+
+  // A folder change can strand an artist that folder has no tracks for — but
+  // only then. Clearing unconditionally also wiped an artist restored from a link.
+  useEffect(() => {
+    if (!library.length) return;
+    // A folder named in a link that this library has never heard of would
+    // otherwise show an empty list with no chip lit to explain it.
+    if (folder && !library.some((t) => t.folder === folder)) return setFolder(null);
+    if (!artist) return;
+    const here = library.filter((t) => !folder || t.folder === folder);
+    const has = here.some((t) =>
+      artistsOf(t.artist).some((a) => a.toLowerCase() === artist.toLowerCase()),
+    );
+    if (!has) setArtist("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folder, library]);
 
   // Dismiss the artist popup on an outside click or Escape, the way a menu should behave.
   useEffect(() => {
@@ -211,18 +379,171 @@ export default function Home() {
     };
   }, [artistOpen]);
 
-  const updatePlaylists = (next: Playlists) => {
-    setPlaylists(next);
-    savePlaylists(next);
-  };
+  /**
+   * Edits read the playlists as they are at the moment they run, not as they
+   * were when the handler was created — an Undo tapped several seconds later
+   * must not resurrect whatever else was deleted in between. Persisting inside
+   * the updater is the trade: it runs twice under StrictMode, writing the same
+   * bytes both times.
+   */
+  const editPlaylists = (fn: (p: Playlists) => Playlists) =>
+    setPlaylists((cur) => {
+      const next = fn(cur);
+      savePlaylists(next);
+      return next;
+    });
 
-  const addTo = (name: string, track: Track) => {
-    if (playlists[name]?.some((t) => t.id === track.id)) return;
+  const updatePlaylists = (next: Playlists) => editPlaylists(() => next);
+
+  /** Tapping a playlist in the sheet adds or takes back out, then says which. */
+  const togglePlaylist = (name: string, track: Track) => {
+    const before = playlists[name] ?? [];
+    const had = before.some((t) => t.id === track.id);
     updatePlaylists({
       ...playlists,
-      [name]: [...(playlists[name] ?? []), track],
+      [name]: had ? before.filter((t) => t.id !== track.id) : [...before, track],
+    });
+    toast.success(had ? `Removed from “${name}”` : `Added to “${name}”`, {
+      description: `${track.title} — ${track.artist}`,
+      action: undoable(name, before),
     });
   };
+
+  /** Undo restores just this playlist, leaving anything edited since alone. */
+  const undoable = (name: string, tracks: Track[]) => ({
+    label: "Undo",
+    onClick: () => editPlaylists((p) => ({ ...p, [name]: tracks })),
+  });
+
+  /** Names are the key, so a new one has to be free before it can be taken. */
+  const freeName = (want: string) => {
+    let name = want;
+    for (let i = 2; playlists[name]; i++) name = `${want} (${i})`;
+    return name;
+  };
+
+  const createPlaylist = (want: string, seed: Track[] = []) => {
+    const name = freeName(want);
+    updatePlaylists({ ...playlists, [name]: seed });
+    toast.success(`Created “${name}”`, {
+      description:
+        // Landing on "Drives (2)" unannounced reads as the app losing input.
+        name !== want
+          ? `You already had a playlist called “${want}”.`
+          : seed.length
+            ? `${seed[0].title} is in it.`
+            : "Add songs from search or your library.",
+    });
+  };
+
+  const renamePlaylist = (from: string, to: string) => {
+    // Silently doing nothing was the old behaviour, and it read as a bug.
+    if (playlists[to])
+      return toast.error(`There is already a playlist called “${to}”`, {
+        description: "Pick another name.",
+      });
+    // Rebuilt in place rather than deleted and re-added, so it keeps its position.
+    const next: Playlists = {};
+    for (const [k, v] of Object.entries(playlists)) next[k === from ? to : k] = v;
+    updatePlaylists(next);
+    if (active === from) setActive(to);
+    toast.success(`Renamed to “${to}”`);
+  };
+
+  const deletePlaylist = (name: string) => {
+    const removed = playlists[name] ?? [];
+    const { [name]: _, ...rest } = playlists;
+    updatePlaylists(rest);
+    if (active === name) setActive(null);
+    // Undo rather than a confirm dialog: nothing is lost, and it costs no click
+    // on the many deletions that were meant.
+    toast.success(`Deleted “${name}”`, {
+      description: `${removed.length} song${removed.length === 1 ? "" : "s"}.`,
+      action: undoable(name, removed),
+    });
+  };
+
+  const saveShared = () => {
+    if (!shared) return;
+    const name = freeName(shared.name);
+    updatePlaylists({ ...playlists, [name]: shared.tracks });
+    setShared(null);
+    setSharedOpen(false);
+    setActive(name);
+    // The link has been spent; leave a clean URL behind.
+    history.replaceState(null, "", location.pathname + location.search);
+    toast.success(`Saved “${name}” to your playlists`, {
+      description: "It lives in this browser now — the link is no longer needed.",
+    });
+  };
+
+  /**
+   * Shares the library view itself, not a copy of the songs in it. The URL
+   * already carries the filter, so the link stays short and stays live: add
+   * another Foeseal track tomorrow and the same link shows it.
+   */
+  const shareView = async () => {
+    const url = location.href;
+    const what = artist || folder || "your library";
+    try {
+      if (navigator.share) return await navigator.share({ title: what, url });
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copied", {
+        description: `Opens on ${what} — ${inLibrary.length} song${inLibrary.length === 1 ? "" : "s"}.`,
+      });
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") return;
+      toast.error("Could not copy the link", {
+        description: "Clipboard access was refused.",
+      });
+    }
+  };
+
+  /** A file the listener keeps — the one copy that outlives this browser profile. */
+  const backup = async () => {
+    const name = `music-playlists-${new Date().toISOString().slice(0, 10)}.json`;
+    const blob = new Blob([await encodeBackup(playlists)], {
+      type: "application/json",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    const n = Object.keys(playlists).length;
+    toast.success(`Backed up ${n} playlist${n === 1 ? "" : "s"}`, {
+      description: `${name} — keep it somewhere that syncs.`,
+    });
+  };
+
+  /** Same-named playlists are replaced, anything else here is left alone. */
+  const restore = async (file: File) => {
+    const restored = await decodeBackup(await file.text(), library);
+    if (!restored)
+      return toast.error("That is not a playlists backup", {
+        description: `${file.name} could not be read.`,
+      });
+    const before = playlists;
+    updatePlaylists({ ...playlists, ...restored });
+    const n = Object.keys(restored).length;
+    toast.success(`Restored ${n} playlist${n === 1 ? "" : "s"}`, {
+      description: "Playlists of the same name were replaced.",
+      action: { label: "Undo", onClick: () => updatePlaylists(before) },
+    });
+  };
+
+  const openDetail = (d: Detail | null) => {
+    setSharedOpen(!!d?.shared);
+    setActive(d && !d.shared ? d.name : null);
+  };
+
+  // Derived, not stored, so the open playlist tracks its own edits.
+  const detail: Detail | null =
+    sharedOpen && shared
+      ? shared
+      : active && playlists[active]
+        ? { name: active, tracks: playlists[active] }
+        : null;
 
   const onFiles = useCallback(async (files: File[]) => {
     const audio = files.filter(
@@ -230,11 +551,31 @@ export default function Home() {
         f.type.startsWith("audio/") ||
         /\.(mp3|m4a|flac|wav|ogg|opus|aac)$/i.test(f.name),
     );
-    if (!audio.length) return;
+    // Dropping a folder of photos used to do nothing at all, silently.
+    if (!audio.length)
+      return toast.error("No audio in that drop", {
+        description: "mp3, m4a, flac, wav, ogg, opus and aac are read.",
+      });
     setImporting(`0 / ${audio.length}`);
     try {
-      await importFiles(audio, (d, t) => setImporting(`${d} / ${t}`));
+      const added = await importFiles(audio, (d, t) =>
+        setImporting(`${d} / ${t}`),
+      );
       setLibrary(await getLibrary());
+      const ignored = files.length - audio.length;
+      toast.success(
+        `Added ${added.length} song${added.length === 1 ? "" : "s"}`,
+        {
+          description: ignored
+            ? `Stored in this browser. ${ignored} non-audio file${ignored === 1 ? " was" : "s were"} ignored.`
+            : "Stored in this browser, playable offline.",
+        },
+      );
+    } catch (e) {
+      // An unreadable file used to reject into nothing and lose the whole batch.
+      toast.error("Import failed", {
+        description: e instanceof Error ? e.message : "Some files could not be read.",
+      });
     } finally {
       setImporting(null);
     }
@@ -244,6 +585,7 @@ export default function Home() {
   // an overlay, and the drop lands in the library. Enter/leave nest through
   // child elements, so a depth counter decides when the drag truly left.
   useEffect(() => {
+    if (!CAN_IMPORT) return;
     let depth = 0;
     const hasFiles = (e: DragEvent) =>
       !!e.dataTransfer?.types.includes("Files");
@@ -350,21 +692,31 @@ export default function Home() {
       ? [...libMatches, ...results]
       : tab === "library"
         ? inLibrary
-        : active
-          ? (playlists[active] ?? [])
-          : [];
+        : (detail?.tracks ?? []);
+
+  /** Nothing to list, so the message stands in for the list and takes its room.
+      The playlists grid carries its own empty state, hence the detail check. */
+  const showEmpty =
+    !shown.length && !searching && (tab !== "playlists" || !!detail);
 
   return (
-    <div className="min-h-dvh bg-canvas pb-40 text-label sm:pb-28">
+    <div className="flex min-h-dvh flex-col bg-canvas pb-40 text-label sm:pb-28">
       <header
         className={`glass sticky top-0 z-30 border-b transition-colors ${
           scrolled ? "border-separator" : "border-transparent"
         }`}
       >
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
-          <h1 className="flex shrink-0 items-center gap-1.5 text-base font-semibold tracking-tight">
-            <Logo className="text-accent" size={20} />
-            <span className="hidden sm:inline">Music</span>
+          {/* Home, the way a logo goes home. The brand page is the colophon's job. */}
+          <h1 className="flex shrink-0 items-center text-base font-semibold tracking-tight">
+            <Link
+              href="/"
+              aria-label="Music — home"
+              className="flex items-center gap-1.5 transition-colors hover:text-accent"
+            >
+              <Logo className="text-accent" size={20} />
+              <span className="hidden sm:inline">Music</span>
+            </Link>
           </h1>
 
           <div className="relative min-w-0 flex-1">
@@ -411,11 +763,11 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-5">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-5">
         {/* The big dropzone is the empty library's call to action. Once songs
             exist it folds into a toolbar button, and dropping files anywhere
             on the page imports them (see the dragging overlay). */}
-        {tab === "library" && !library.length && (
+        {CAN_IMPORT && tab === "library" && loaded && !library.length && (
           <DropZone onFiles={onFiles} importing={importing} />
         )}
 
@@ -607,7 +959,7 @@ export default function Home() {
               </select>
 
               <button
-                onClick={() => inLibrary.length && play(inLibrary, 0)}
+                onClick={() => playAll(inLibrary, false, artist || folder || "your library")}
                 disabled={!inLibrary.length}
                 title="Play these in order"
                 className="flex h-9 items-center gap-1.5 rounded-control bg-accent px-4 text-xs font-semibold text-white transition hover:brightness-110 active:scale-[0.97] disabled:opacity-40"
@@ -616,7 +968,7 @@ export default function Home() {
                 Play
               </button>
               <button
-                onClick={() => inLibrary.length && play(shuffled(inLibrary), 0)}
+                onClick={() => playAll(inLibrary, true, artist || folder || "your library")}
                 disabled={!inLibrary.length}
                 title="Play these in a random order"
                 className="flex h-9 items-center gap-1.5 rounded-control bg-fill px-4 text-xs font-medium text-label transition hover:bg-fill-2 active:scale-[0.97] disabled:opacity-40"
@@ -624,7 +976,20 @@ export default function Home() {
                 <TbArrowsShuffle size={13} />
                 Shuffle
               </button>
-              <ImportButtons onFiles={onFiles} importing={importing} />
+              {/* Only once something is actually selected — a link to the
+                  unfiltered library is just the site. */}
+              {(!!artist || !!folder || !!needle) && (
+                <button
+                  onClick={shareView}
+                  disabled={!inLibrary.length}
+                  title="Copy a link that opens on this selection"
+                  className="flex h-9 items-center gap-1.5 rounded-control bg-fill px-4 text-xs font-medium text-label transition hover:bg-fill-2 active:scale-[0.97] disabled:opacity-40"
+                >
+                  <TbShare3 size={13} />
+                  Share
+                </button>
+              )}
+              {CAN_IMPORT && <ImportButtons onFiles={onFiles} importing={importing} />}
             </div>
 
             {(!!needle || !!artist) && (
@@ -648,16 +1013,18 @@ export default function Home() {
         )}
 
         {tab === "playlists" && (
-          <PlaylistBar
+          <PlaylistsView
             playlists={playlists}
-            active={active}
-            setActive={setActive}
-            onCreate={(name) => updatePlaylists({ ...playlists, [name]: [] })}
-            onDelete={(name) => {
-              const { [name]: _, ...rest } = playlists;
-              updatePlaylists(rest);
-              if (active === name) setActive(null);
-            }}
+            shared={shared}
+            detail={detail}
+            open={openDetail}
+            onCreate={(name) => createPlaylist(name)}
+            onRename={renamePlaylist}
+            onDelete={deletePlaylist}
+            onSaveShared={saveShared}
+            onBackup={backup}
+            onRestore={restore}
+            onPlay={playAll}
           />
         )}
 
@@ -672,8 +1039,10 @@ export default function Home() {
           <p className="py-8 text-center text-sm text-accent">{searchError}</p>
         )}
 
-        {!shown.length && !searching && (
-          <div className="flex flex-col items-center gap-2.5 py-16 text-center">
+        {/* The playlists grid carries its own empty state, so this one is only for
+            an open playlist that has nothing in it yet. */}
+        {showEmpty && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2.5 py-16 text-center">
             <TbMusic className="text-label-3" size={32} />
             <p className="max-w-xs text-sm text-label-2">
               {tab === "search"
@@ -683,10 +1052,10 @@ export default function Home() {
                 : tab === "library"
                   ? library.length
                     ? "No tracks match those filters."
-                    : "Your library is empty. Add audio files above."
-                  : active
-                    ? "This playlist is empty. Add tracks from search or your library."
-                    : "Create a playlist to get started."}
+                    : CAN_IMPORT
+                      ? "Your library is empty. Add audio files above."
+                      : "The library is still loading."
+                  : "This playlist is empty. Add tracks from search or your library."}
             </p>
           </div>
         )}
@@ -702,33 +1071,55 @@ export default function Home() {
                 if (queue[qIndex]?.id === track.id) setPlaying(!playing);
                 else play(shown, i);
               }}
-              playlistNames={Object.keys(playlists)}
-              onAdd={(name) => addTo(name, track)}
-              onQueue={(mode) => enqueue(track, mode)}
-              onNewPlaylist={() => {
-                const name = window.prompt("Playlist name")?.trim();
-                if (name) updatePlaylists({ ...playlists, [name]: [track] });
-              }}
+              onAddTo={() => setAddTo(track)}
               onRemove={
                 // Bundled tracks ship with the site; removeTrack can't evict one, it would just reappear.
                 tab === "library" && !track.id.startsWith("file:")
                   ? async () => {
                       await removeTrack(track.id);
                       setLibrary(await getLibrary());
+                      // No Undo here: removeTrack drops the audio blob itself.
+                      toast.success("Removed from your library", {
+                        description: `${track.title} — ${track.artist}`,
+                      });
                     }
-                  : tab === "playlists" && active
-                    ? () =>
+                  : // A shared playlist is someone else's; it is saved before it is edited.
+                    tab === "playlists" && active && playlists[active]
+                    ? () => {
+                        const before = playlists[active];
                         updatePlaylists({
                           ...playlists,
-                          [active]: playlists[active].filter(
-                            (t) => t.id !== track.id,
-                          ),
-                        })
+                          [active]: before.filter((t) => t.id !== track.id),
+                        });
+                        toast.success(`Removed from “${active}”`, {
+                          description: `${track.title} — ${track.artist}`,
+                          action: undoable(active, before),
+                        });
+                      }
                     : undefined
               }
             />
           ))}
         </ul>
+
+        {/* The colophon lives on Search alone. On Library and Playlists it read
+            as a footer demanding to be noticed under every short list; here the
+            screen is quiet enough to carry it. */}
+        {tab === "search" && (
+          <>
+            {/* Only when nothing else is already growing: with the empty state
+                on screen the two would split the space and centre nothing. */}
+            {!showEmpty && <div className="flex-1" aria-hidden />}
+            <footer className="mt-12 border-t border-separator pt-6 text-center">
+              <Link
+                href="/brand"
+                className="text-xxs font-medium uppercase tracking-widest text-label-3 underline-offset-4 transition-colors hover:text-label hover:underline"
+              >
+                Music by Purna — the mark, the type and the colour
+              </Link>
+            </footer>
+          </>
+        )}
       </main>
 
       <button
@@ -742,8 +1133,19 @@ export default function Home() {
 
       {showKeys && <ShortcutSheet onClose={() => setShowKeys(false)} />}
 
+      {addTo && (
+        <AddToSheet
+          track={addTo}
+          playlists={playlists}
+          onToggle={(name) => togglePlaylist(name, addTo)}
+          onCreate={(name) => createPlaylist(name, [addTo])}
+          onQueue={(mode) => enqueue(addTo, mode)}
+          onClose={() => setAddTo(null)}
+        />
+      )}
+
       {/* pointer-events-none: the drop itself must fall through to the window. */}
-      {dragging && (
+      {CAN_IMPORT && dragging && (
         <div className="pointer-events-none fixed inset-0 z-[60] grid place-items-center bg-black/70 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3 rounded-sheet border-2 border-dashed border-accent px-12 py-10 text-center">
             <TbUpload className="text-accent" size={36} />
@@ -918,20 +1320,14 @@ function Row({
   active,
   playing,
   onPlay,
-  playlistNames,
-  onAdd,
-  onNewPlaylist,
-  onQueue,
+  onAddTo,
   onRemove,
 }: {
   track: Track;
   active: boolean;
   playing: boolean;
   onPlay: () => void;
-  playlistNames: string[];
-  onAdd: (name: string) => void;
-  onNewPlaylist: () => void;
-  onQueue: (mode: "next" | "end") => void;
+  onAddTo: () => void;
   onRemove?: () => void;
 }) {
   return (
@@ -995,37 +1391,14 @@ function Row({
         </span>
       )}
 
-      <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-label-3 transition hover:bg-fill-2 hover:text-label">
+      <button
+        onClick={onAddTo}
+        aria-label={`Add ${track.title} to a playlist or the queue`}
+        title="Add to playlist or queue"
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-label-3 transition hover:bg-fill-2 hover:text-label"
+      >
         <TbPlus size={16} />
-        <select
-          value=""
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "__next") onQueue("next");
-            else if (v === "__end") onQueue("end");
-            else if (v === "__new") onNewPlaylist();
-            else if (v) onAdd(v);
-            e.target.value = "";
-          }}
-          aria-label="Add to queue or playlist"
-          title="Add to queue or playlist"
-          className="absolute inset-0 appearance-none rounded bg-transparent text-transparent opacity-0"
-        >
-          <option value="">Add to…</option>
-          <optgroup label="Queue">
-            <option value="__next">Play next</option>
-            <option value="__end">Add to queue</option>
-          </optgroup>
-          <optgroup label="Playlists">
-            {playlistNames.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-            <option value="__new">New playlist…</option>
-          </optgroup>
-        </select>
-      </span>
+      </button>
 
       {track.appleUrl && (
         <a
@@ -1169,75 +1542,6 @@ function DropZone({
           </button>
         </>
       )}
-    </div>
-  );
-}
-
-function PlaylistBar({
-  playlists,
-  active,
-  setActive,
-  onCreate,
-  onDelete,
-}: {
-  playlists: Playlists;
-  active: string | null;
-  setActive: (n: string | null) => void;
-  onCreate: (name: string) => void;
-  onDelete: (name: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const names = Object.keys(playlists);
-
-  return (
-    <div className="mb-6 space-y-3">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          const n = name.trim();
-          if (n && !playlists[n]) {
-            onCreate(n);
-            setActive(n);
-          }
-          setName("");
-        }}
-        className="flex gap-2"
-      >
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="New playlist name"
-          className="h-9 min-w-0 flex-1 rounded-control bg-fill px-3 text-sm outline-none transition placeholder:text-label-3 focus:bg-fill-2"
-        />
-        <button className="flex h-9 shrink-0 items-center gap-1.5 rounded-control bg-accent px-4 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.97]">
-          <TbPlus size={15} />
-          Create
-        </button>
-      </form>
-
-      <div className="flex flex-wrap gap-2">
-        {names.map((n) => (
-          <span
-            key={n}
-            className={`flex h-8 items-center gap-1 rounded-full pl-3 pr-1 text-xs font-medium transition ${
-              active === n
-                ? "bg-accent text-white"
-                : "bg-fill text-label-2 hover:bg-fill-2 hover:text-label"
-            }`}
-          >
-            <button onClick={() => setActive(n)} className="py-2">
-              {n} ({playlists[n].length})
-            </button>
-            <button
-              onClick={() => onDelete(n)}
-              aria-label={`Delete ${n}`}
-              className="grid h-6 w-6 place-items-center rounded-full opacity-60 transition hover:bg-black/20 hover:opacity-100"
-            >
-              <TbTrash size={13} />
-            </button>
-          </span>
-        ))}
-      </div>
     </div>
   );
 }

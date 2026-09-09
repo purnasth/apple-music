@@ -287,6 +287,132 @@ export function savePlaylists(p: Playlists) {
   localStorage.setItem(PL_KEY, JSON.stringify(clean));
 }
 
+/* ---------- Sharing: the playlist travels inside the link ----------
+   There is no server to store a playlist on, so the link carries it: gzip the
+   list, base64url it, hang it off the fragment. The fragment never reaches the
+   host, and a bundled track collapses to its id because the recipient's copy of
+   songs.json already has the rest. */
+
+/** A bundled track is just its id; anything else carries metadata. Preview URLs
+    are dropped — Deezer's expire in minutes and audioSrc refetches from the id. */
+type SharedTrack = string | Omit<Track, 'preview' | 'local' | 'folder'>;
+
+const b64url = (bytes: Uint8Array) =>
+  btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(''))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+const unb64url = (s: string) =>
+  Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+
+const gz = async (data: BlobPart, t: CompressionFormat, Codec = CompressionStream) =>
+  new Response(new Blob([data]).stream().pipeThrough(new Codec(t)));
+
+/** Imported files live in the sender's IndexedDB, so they cannot travel; caller warns. */
+export const shareable = (tracks: Track[]) => tracks.filter((t) => !t.local);
+
+export async function encodePlaylist(name: string, tracks: Track[]): Promise<string> {
+  const items: SharedTrack[] = shareable(tracks).map((t) =>
+    t.id.startsWith('file:')
+      ? t.id
+      : {
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+          artwork: t.artwork,
+          artworkLarge: t.artworkLarge,
+          appleUrl: t.appleUrl,
+          duration: t.duration,
+        }
+  );
+  const body = JSON.stringify([name, items]);
+  return b64url(new Uint8Array(await (await gz(body, 'gzip')).arrayBuffer()));
+}
+
+/** A link is untrusted input: every field is re-typed, and every URL must be https
+    so a crafted link cannot smuggle a javascript: href into the list. */
+const httpsUrl = (v: unknown) => (typeof v === 'string' && v.startsWith('https://') ? v : undefined);
+
+const fromShared = (x: unknown, byId: Map<string, Track>): Track | undefined => {
+  if (typeof x === 'string') return byId.get(x);
+  if (!x || typeof x !== 'object') return;
+  const r = x as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === 'string' ? v.slice(0, 300) : '');
+  const id = str(r.id);
+  if (!id || id.startsWith('local:')) return;
+  return {
+    id,
+    title: str(r.title) || 'Unknown title',
+    artist: str(r.artist) || 'Unknown artist',
+    album: str(r.album),
+    // Relative paths belong to this site's own manifest, which the id lookup covers.
+    artwork: httpsUrl(r.artwork),
+    artworkLarge: httpsUrl(r.artworkLarge),
+    appleUrl: httpsUrl(r.appleUrl),
+    duration: typeof r.duration === 'number' && isFinite(r.duration) ? r.duration : undefined,
+  };
+};
+
+export async function decodePlaylist(
+  code: string,
+  library: Track[]
+): Promise<{ name: string; tracks: Track[] } | null> {
+  // A short cap keeps a hand-crafted archive from unpacking into gigabytes.
+  if (!code || code.length > 200_000) return null;
+  try {
+    const text = await (await gz(unb64url(code), 'gzip', DecompressionStream)).text();
+    const parsed = JSON.parse(text) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const [name, items] = parsed as [unknown, unknown];
+    if (!Array.isArray(items)) return null;
+    const byId = new Map(library.map((t) => [t.id, t]));
+    return {
+      name: (typeof name === 'string' && name.trim().slice(0, 80)) || 'Shared playlist',
+      tracks: items
+        .slice(0, 500)
+        .map((x) => fromShared(x, byId))
+        .filter((t): t is Track => !!t),
+    };
+  } catch {
+    return null; // Truncated in a chat app, hand-edited, or simply not one of ours.
+  }
+}
+
+/* ---------- Backup: every playlist in one file ---------- */
+
+/** A list of share codes rather than a format of its own, so backup and link use
+    one encoder and one validation path on the way back in. */
+export async function encodeBackup(p: Playlists): Promise<string> {
+  return JSON.stringify(
+    {
+      app: 'apple-music',
+      saved: new Date().toISOString(),
+      playlists: await Promise.all(
+        Object.entries(p).map(([name, tracks]) => encodePlaylist(name, tracks))
+      ),
+    },
+    null,
+    2
+  );
+}
+
+export async function decodeBackup(text: string, library: Track[]): Promise<Playlists | null> {
+  try {
+    const { playlists } = JSON.parse(text) as { playlists?: unknown };
+    if (!Array.isArray(playlists)) return null;
+    const out: Playlists = {};
+    for (const code of playlists.slice(0, 200)) {
+      const p = typeof code === 'string' ? await decodePlaylist(code, library) : null;
+      if (p) out[p.name] = p.tracks;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Tags credit a collaboration as one string — "Pritam, Arijit Singh & Amitabh Bhattacharya"
  * is three people, and grouping by the raw string buries Arijit Singh across a dozen
@@ -311,6 +437,13 @@ export function shuffled<T>(items: T[]): T[] {
   }
   return a;
 }
+
+/** A whole playlist reads as "48 min", not as a 48:12 clock. */
+export const fmtTotal = (tracks: Track[]) => {
+  const m = Math.round(tracks.reduce((n, t) => n + (t.duration ?? 0), 0) / 60);
+  if (!m) return '';
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} hr ${m % 60} min`;
+};
 
 export const fmtTime = (s?: number) => {
   // 0 is a real time (a track starts there) — only absent/infinite is unknown.

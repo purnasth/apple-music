@@ -65,6 +65,15 @@ body {
   @apply bg-elevated/88 backdrop-blur-[30px] backdrop-saturate-[1.8];
 }
 
+/* The toaster's `offset` prop does reach Sonner — it lands on the container as
+   --offset-top: 72px — but the rule that positions a top-anchored toaster
+   resolves to a flat 16px, which drops the toast onto the sticky header. Re-assert
+   it, one notch more specific so it wins wherever the two stylesheets land in
+   the bundle. 72px clears the header (10 + 36 + 10) with air to spare. */
+html [data-sonner-toaster][data-y-position="top"] {
+  top: var(--offset-top, 72px);
+}
+
 /* Transparency is decoration, not information: honour the system setting. */
 @media (prefers-reduced-transparency: reduce) {
   .glass {
