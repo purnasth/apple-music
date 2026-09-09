@@ -18,6 +18,7 @@ import {
   TbUpload,
   TbX,
 } from "react-icons/tb";
+import { gooeyToast } from "goey-toast";
 import Player from "@/components/Player";
 import {
   AddToSheet,
@@ -119,11 +120,20 @@ export default function Home() {
       // A shared link: #p=<gzipped playlist>. The library has to be in hand
       // first, since bundled tracks travel as bare ids.
       const code = location.hash.startsWith("#p=") ? location.hash.slice(3) : "";
-      const p = code && (await decodePlaylist(code, lib));
+      if (!code) return;
+      const p = await decodePlaylist(code, lib);
       if (p && p.tracks.length) {
         setShared({ ...p, shared: true });
         setSharedOpen(true);
         setTab("playlists");
+        gooeyToast.info(`“${p.name}” was shared with you`, {
+          description: `${p.tracks.length} songs. Play it now, or save it to keep it.`,
+        });
+      } else {
+        // A link truncated by a chat app used to land on an ordinary empty tab.
+        gooeyToast.error("That shared link could not be read", {
+          description: "It may have been cut short on its way here.",
+        });
       }
     });
     setPlaylists(getPlaylists());
@@ -137,11 +147,40 @@ export default function Home() {
       .catch(() => {});
     // Streams, caches and range-serves the bundled songs — see public/sw.js.
     navigator.serviceWorker?.register("/sw.js").catch(() => {});
+    // sw.js claims its clients on activate, so this fires exactly once: on the
+    // visit that installs it. Later visits arrive already controlled and stay quiet.
+    navigator.serviceWorker?.addEventListener(
+      "controllerchange",
+      () =>
+        gooeyToast.success("Ready to play offline", {
+          description: "Songs you play are kept on this device.",
+        }),
+      { once: true },
+    );
   }, []);
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [tab]);
+
+  // Half this app works without a connection and half does not, which is worth
+  // saying before a search comes back empty and looks broken. One id, so a flaky
+  // connection replaces the message rather than stacking it.
+  useEffect(() => {
+    const offline = () =>
+      gooeyToast.warning("You are offline", {
+        id: "connection",
+        description: "Your library still plays. Search needs a connection.",
+      });
+    const online = () =>
+      gooeyToast.success("Back online", { id: "connection" });
+    window.addEventListener("offline", offline);
+    window.addEventListener("online", online);
+    return () => {
+      window.removeEventListener("offline", offline);
+      window.removeEventListener("online", online);
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -206,6 +245,20 @@ export default function Home() {
     setRecent(pushRecent(tracks[i]));
   };
 
+  /**
+   * The bulk Play and Shuffle buttons, which replace the whole queue. A single
+   * row click does not come through here — starting one song is self-evident,
+   * and it happens far too often to narrate.
+   */
+  const playAll = (tracks: Track[], shuffle: boolean, what: string) => {
+    if (!tracks.length) return;
+    play(shuffle ? shuffled(tracks) : tracks, 0);
+    gooeyToast.success(shuffle ? `Shuffling ${what}` : `Playing ${what}`, {
+      id: "queue",
+      description: `${tracks.length} song${tracks.length === 1 ? "" : "s"} queued.`,
+    });
+  };
+
   /** Every index move (skip, auto-advance, queue click) lands here, so it can log history. */
   const jumpTo = (i: number) => {
     setQIndex(i);
@@ -214,10 +267,16 @@ export default function Home() {
 
   /** Insert into the live queue — right after the current track, or at the end. */
   const enqueue = (track: Track, mode: "next" | "end") => {
+    // An empty queue just starts playing, which is its own feedback.
     if (!queue.length) return play([track], 0);
     const q = [...queue];
     q.splice(mode === "next" ? qIndex + 1 : q.length, 0, track);
     setQueue(q);
+    // The sheet closes on these, so without this the queue changed invisibly.
+    gooeyToast.success(
+      mode === "next" ? "Playing next" : "Added to the queue",
+      { description: `${track.title} — ${track.artist}` },
+    );
   };
 
   // A folder change can strand an artist selection that folder has no tracks for.
@@ -239,21 +298,41 @@ export default function Home() {
     };
   }, [artistOpen]);
 
-  const updatePlaylists = (next: Playlists) => {
-    setPlaylists(next);
-    savePlaylists(next);
-  };
+  /**
+   * Edits read the playlists as they are at the moment they run, not as they
+   * were when the handler was created — an Undo tapped several seconds later
+   * must not resurrect whatever else was deleted in between. Persisting inside
+   * the updater is the trade: it runs twice under StrictMode, writing the same
+   * bytes both times.
+   */
+  const editPlaylists = (fn: (p: Playlists) => Playlists) =>
+    setPlaylists((cur) => {
+      const next = fn(cur);
+      savePlaylists(next);
+      return next;
+    });
 
-  /** The sheet stays open while you tick playlists, so a second tap takes it back out. */
+  const updatePlaylists = (next: Playlists) => editPlaylists(() => next);
+
+  /** Tapping a playlist in the sheet adds or takes back out, then says which. */
   const togglePlaylist = (name: string, track: Track) => {
-    const list = playlists[name] ?? [];
+    const before = playlists[name] ?? [];
+    const had = before.some((t) => t.id === track.id);
     updatePlaylists({
       ...playlists,
-      [name]: list.some((t) => t.id === track.id)
-        ? list.filter((t) => t.id !== track.id)
-        : [...list, track],
+      [name]: had ? before.filter((t) => t.id !== track.id) : [...before, track],
+    });
+    gooeyToast.success(had ? `Removed from “${name}”` : `Added to “${name}”`, {
+      description: `${track.title} — ${track.artist}`,
+      action: undoable(name, before),
     });
   };
+
+  /** Undo restores just this playlist, leaving anything edited since alone. */
+  const undoable = (name: string, tracks: Track[]) => ({
+    label: "Undo",
+    onClick: () => editPlaylists((p) => ({ ...p, [name]: tracks })),
+  });
 
   /** Names are the key, so a new one has to be free before it can be taken. */
   const freeName = (want: string) => {
@@ -262,13 +341,45 @@ export default function Home() {
     return name;
   };
 
+  const createPlaylist = (want: string, seed: Track[] = []) => {
+    const name = freeName(want);
+    updatePlaylists({ ...playlists, [name]: seed });
+    gooeyToast.success(`Created “${name}”`, {
+      description:
+        // Landing on "Drives (2)" unannounced reads as the app losing input.
+        name !== want
+          ? `You already had a playlist called “${want}”.`
+          : seed.length
+            ? `${seed[0].title} is in it.`
+            : "Add songs from search or your library.",
+    });
+  };
+
   const renamePlaylist = (from: string, to: string) => {
-    if (playlists[to]) return;
+    // Silently doing nothing was the old behaviour, and it read as a bug.
+    if (playlists[to])
+      return gooeyToast.error(`There is already a playlist called “${to}”`, {
+        description: "Pick another name.",
+      });
     // Rebuilt in place rather than deleted and re-added, so it keeps its position.
     const next: Playlists = {};
     for (const [k, v] of Object.entries(playlists)) next[k === from ? to : k] = v;
     updatePlaylists(next);
     if (active === from) setActive(to);
+    gooeyToast.success(`Renamed to “${to}”`);
+  };
+
+  const deletePlaylist = (name: string) => {
+    const removed = playlists[name] ?? [];
+    const { [name]: _, ...rest } = playlists;
+    updatePlaylists(rest);
+    if (active === name) setActive(null);
+    // Undo rather than a confirm dialog: nothing is lost, and it costs no click
+    // on the many deletions that were meant.
+    gooeyToast.success(`Deleted “${name}”`, {
+      description: `${removed.length} song${removed.length === 1 ? "" : "s"}.`,
+      action: undoable(name, removed),
+    });
   };
 
   const saveShared = () => {
@@ -280,25 +391,42 @@ export default function Home() {
     setActive(name);
     // The link has been spent; leave a clean URL behind.
     history.replaceState(null, "", location.pathname + location.search);
+    gooeyToast.success(`Saved “${name}” to your playlists`, {
+      description: "It lives in this browser now — the link is no longer needed.",
+    });
   };
 
   /** A file the listener keeps — the one copy that outlives this browser profile. */
   const backup = async () => {
+    const name = `music-playlists-${new Date().toISOString().slice(0, 10)}.json`;
     const blob = new Blob([await encodeBackup(playlists)], {
       type: "application/json",
     });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `music-playlists-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = name;
     a.click();
     URL.revokeObjectURL(a.href);
+    const n = Object.keys(playlists).length;
+    gooeyToast.success(`Backed up ${n} playlist${n === 1 ? "" : "s"}`, {
+      description: `${name} — keep it somewhere that syncs.`,
+    });
   };
 
   /** Same-named playlists are replaced, anything else here is left alone. */
   const restore = async (file: File) => {
     const restored = await decodeBackup(await file.text(), library);
-    if (!restored) return alert("That does not look like a playlists backup.");
+    if (!restored)
+      return gooeyToast.error("That is not a playlists backup", {
+        description: `${file.name} could not be read.`,
+      });
+    const before = playlists;
     updatePlaylists({ ...playlists, ...restored });
+    const n = Object.keys(restored).length;
+    gooeyToast.success(`Restored ${n} playlist${n === 1 ? "" : "s"}`, {
+      description: "Playlists of the same name were replaced.",
+      action: { label: "Undo", onClick: () => updatePlaylists(before) },
+    });
   };
 
   const openDetail = (d: Detail | null) => {
@@ -320,11 +448,31 @@ export default function Home() {
         f.type.startsWith("audio/") ||
         /\.(mp3|m4a|flac|wav|ogg|opus|aac)$/i.test(f.name),
     );
-    if (!audio.length) return;
+    // Dropping a folder of photos used to do nothing at all, silently.
+    if (!audio.length)
+      return gooeyToast.error("No audio in that drop", {
+        description: "mp3, m4a, flac, wav, ogg, opus and aac are read.",
+      });
     setImporting(`0 / ${audio.length}`);
     try {
-      await importFiles(audio, (d, t) => setImporting(`${d} / ${t}`));
+      const added = await importFiles(audio, (d, t) =>
+        setImporting(`${d} / ${t}`),
+      );
       setLibrary(await getLibrary());
+      const ignored = files.length - audio.length;
+      gooeyToast.success(
+        `Added ${added.length} song${added.length === 1 ? "" : "s"}`,
+        {
+          description: ignored
+            ? `Stored in this browser. ${ignored} non-audio file${ignored === 1 ? " was" : "s were"} ignored.`
+            : "Stored in this browser, playable offline.",
+        },
+      );
+    } catch (e) {
+      // An unreadable file used to reject into nothing and lose the whole batch.
+      gooeyToast.error("Import failed", {
+        description: e instanceof Error ? e.message : "Some files could not be read.",
+      });
     } finally {
       setImporting(null);
     }
@@ -695,7 +843,7 @@ export default function Home() {
               </select>
 
               <button
-                onClick={() => inLibrary.length && play(inLibrary, 0)}
+                onClick={() => playAll(inLibrary, false, artist || folder || "your library")}
                 disabled={!inLibrary.length}
                 title="Play these in order"
                 className="flex h-9 items-center gap-1.5 rounded-control bg-accent px-4 text-xs font-semibold text-white transition hover:brightness-110 active:scale-[0.97] disabled:opacity-40"
@@ -704,7 +852,7 @@ export default function Home() {
                 Play
               </button>
               <button
-                onClick={() => inLibrary.length && play(shuffled(inLibrary), 0)}
+                onClick={() => playAll(inLibrary, true, artist || folder || "your library")}
                 disabled={!inLibrary.length}
                 title="Play these in a random order"
                 className="flex h-9 items-center gap-1.5 rounded-control bg-fill px-4 text-xs font-medium text-label transition hover:bg-fill-2 active:scale-[0.97] disabled:opacity-40"
@@ -741,21 +889,13 @@ export default function Home() {
             shared={shared}
             detail={detail}
             open={openDetail}
-            onCreate={(name) =>
-              updatePlaylists({ ...playlists, [freeName(name)]: [] })
-            }
+            onCreate={(name) => createPlaylist(name)}
             onRename={renamePlaylist}
-            onDelete={(name) => {
-              const { [name]: _, ...rest } = playlists;
-              updatePlaylists(rest);
-              if (active === name) setActive(null);
-            }}
+            onDelete={deletePlaylist}
             onSaveShared={saveShared}
             onBackup={backup}
             onRestore={restore}
-            onPlay={(tracks, shuffle) =>
-              tracks.length && play(shuffle ? shuffled(tracks) : tracks, 0)
-            }
+            onPlay={playAll}
           />
         )}
 
@@ -807,16 +947,24 @@ export default function Home() {
                   ? async () => {
                       await removeTrack(track.id);
                       setLibrary(await getLibrary());
+                      // No Undo here: removeTrack drops the audio blob itself.
+                      gooeyToast.success("Removed from your library", {
+                        description: `${track.title} — ${track.artist}`,
+                      });
                     }
                   : // A shared playlist is someone else's; it is saved before it is edited.
                     tab === "playlists" && active && playlists[active]
-                    ? () =>
+                    ? () => {
+                        const before = playlists[active];
                         updatePlaylists({
                           ...playlists,
-                          [active]: playlists[active].filter(
-                            (t) => t.id !== track.id,
-                          ),
-                        })
+                          [active]: before.filter((t) => t.id !== track.id),
+                        });
+                        gooeyToast.success(`Removed from “${active}”`, {
+                          description: `${track.title} — ${track.artist}`,
+                          action: undoable(active, before),
+                        });
+                      }
                     : undefined
               }
             />
@@ -840,9 +988,7 @@ export default function Home() {
           track={addTo}
           playlists={playlists}
           onToggle={(name) => togglePlaylist(name, addTo)}
-          onCreate={(name) =>
-            updatePlaylists({ ...playlists, [freeName(name)]: [addTo] })
-          }
+          onCreate={(name) => createPlaylist(name, [addTo])}
           onQueue={(mode) => enqueue(addTo, mode)}
           onClose={() => setAddTo(null)}
         />

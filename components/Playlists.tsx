@@ -19,6 +19,7 @@ import {
   TbUpload,
   TbX,
 } from "react-icons/tb";
+import { gooeyToast } from "goey-toast";
 import {
   Track,
   Playlists,
@@ -177,9 +178,13 @@ export function AddToSheet({
             return (
               <SheetRow
                 key={n}
-                // The sheet stays open on a tap: adding one song to three playlists
-                // is one trip, and the check is the receipt that it landed.
-                onClick={() => onToggle(n)}
+                // Closing on the tap is what makes the toast visible at all: a
+                // modal dialog sits in the top layer, above any toast. The check
+                // shows what a playlist already holds before you decide.
+                onClick={() => {
+                  onToggle(n);
+                  close();
+                }}
                 icon={<Mosaic tracks={list} className="h-9 w-9 rounded-[6px]" />}
                 title={n}
                 subtitle={songs(list.length)}
@@ -194,8 +199,10 @@ export function AddToSheet({
         onSubmit={(e) => {
           e.preventDefault();
           const n = name.trim();
-          if (n) onCreate(n);
+          if (!n) return;
+          onCreate(n);
           setName("");
+          close();
         }}
         className="flex gap-2 border-t border-separator p-3"
       >
@@ -311,7 +318,7 @@ export function PlaylistsView({
   onSaveShared: () => void;
   onBackup: () => void;
   onRestore: (file: File) => void;
-  onPlay: (tracks: Track[], shuffle: boolean) => void;
+  onPlay: (tracks: Track[], shuffle: boolean, what: string) => void;
 }) {
   if (detail)
     return (
@@ -360,7 +367,7 @@ export function PlaylistsView({
             tracks={shared.tracks}
             badge="Shared with you"
             onOpen={() => open(shared)}
-            onPlay={() => onPlay(shared.tracks, false)}
+            onPlay={() => onPlay(shared.tracks, false, `“${shared.name}”`)}
           />
         )}
         {names.map((n) => (
@@ -369,7 +376,7 @@ export function PlaylistsView({
             name={n}
             tracks={playlists[n]}
             onOpen={() => open({ name: n, tracks: playlists[n] })}
-            onPlay={() => onPlay(playlists[n], false)}
+            onPlay={() => onPlay(playlists[n], false, `“${n}”`)}
           />
         ))}
       </div>
@@ -540,11 +547,10 @@ function PlaylistDetail({
   onRename: (from: string, to: string) => void;
   onDelete: (name: string) => void;
   onSaveShared: () => void;
-  onPlay: (tracks: Track[], shuffle: boolean) => void;
+  onPlay: (tracks: Track[], shuffle: boolean, what: string) => void;
 }) {
   const { name, tracks, shared } = detail;
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [note, setNote] = useState("");
   const empty = !tracks.length;
 
   // The link is the playlist: there is no server, so the songs are gzipped into
@@ -552,22 +558,30 @@ function PlaylistDetail({
   const share = async () => {
     const sendable = shareable(tracks);
     if (!sendable.length)
-      return setNote("Nothing to share — imported files stay on your device.");
+      return gooeyToast.warning("Nothing here can be shared", {
+        description: "Imported files stay on the device that imported them.",
+      });
+
     const url = `${location.origin}${location.pathname}#p=${await encodePlaylist(name, tracks)}`;
     const left = tracks.length - sendable.length;
-    const skipped = left ? ` · ${left} imported file${left === 1 ? "" : "s"} left out` : "";
+    const skipped = left
+      ? ` ${left} imported file${left === 1 ? "" : "s"} could not travel.`
+      : "";
     try {
-      if (navigator.share) {
-        await navigator.share({ title: name, url });
-        return;
-      }
+      // The OS share sheet is its own confirmation; a toast on top would nag.
+      if (navigator.share) return await navigator.share({ title: name, url });
       await navigator.clipboard.writeText(url);
-      setNote(`Link copied${skipped}`);
+      gooeyToast.success("Link copied", {
+        description: `Anyone who opens it gets all ${sendable.length} songs.${skipped}`,
+      });
     } catch (e) {
       // A cancelled share sheet is not a failure worth reporting.
-      if ((e as Error)?.name !== "AbortError") setNote("Could not copy the link.");
+      if ((e as Error)?.name === "AbortError") return;
+      gooeyToast.error("Could not copy the link", {
+        description: "Clipboard access was refused.",
+        action: { label: "Try again", onClick: share },
+      });
     }
-    setTimeout(() => setNote(""), 4000);
   };
 
   return (
@@ -619,7 +633,7 @@ function PlaylistDetail({
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
-              onClick={() => onPlay(tracks, false)}
+              onClick={() => onPlay(tracks, false, `“${name}”`)}
               disabled={empty}
               className="flex h-9 items-center gap-1.5 rounded-control bg-accent px-4 text-xs font-semibold text-white transition hover:brightness-110 active:scale-[0.97] disabled:opacity-40"
             >
@@ -627,7 +641,7 @@ function PlaylistDetail({
               Play
             </button>
             <button
-              onClick={() => onPlay(tracks, true)}
+              onClick={() => onPlay(tracks, true, `“${name}”`)}
               disabled={empty}
               className="flex h-9 items-center gap-1.5 rounded-control bg-fill px-4 text-xs font-medium text-label transition hover:bg-fill-2 active:scale-[0.97] disabled:opacity-40"
             >
@@ -664,11 +678,10 @@ function PlaylistDetail({
                 </button>
                 <button
                   onClick={() => {
-                    // Deleting a playlist cannot be undone, so it asks first.
-                    if (confirm(`Delete “${name}”? This cannot be undone.`)) {
-                      onDelete(name);
-                      onBack();
-                    }
+                    // No confirm: the toast that follows carries an Undo, which
+                    // costs nothing on the deletions that were meant.
+                    onDelete(name);
+                    onBack();
                   }}
                   aria-label="Delete playlist"
                   title="Delete"
@@ -679,13 +692,6 @@ function PlaylistDetail({
               </>
             )}
           </div>
-
-          <p
-            role="status"
-            className={`mt-2 text-[11px] text-label-2 transition-opacity ${note ? "opacity-100" : "opacity-0"}`}
-          >
-            {note || " "}
-          </p>
         </div>
       </div>
     </div>

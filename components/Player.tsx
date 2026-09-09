@@ -16,6 +16,7 @@ import {
   TbVolumeOff,
   TbX,
 } from "react-icons/tb";
+import { gooeyToast } from "goey-toast";
 import {
   Track,
   audioSrc,
@@ -70,6 +71,34 @@ export default function Player({
   const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
+
+  /**
+   * The inline message stays — it marks *this* track as broken for as long as it
+   * is loaded. The toast is what catches the eye, and a fixed id means skipping
+   * through a stale shared playlist replaces one toast instead of stacking ten.
+   */
+  const fail = (message: string) => {
+    setError(message);
+    gooeyToast.error(message, {
+      id: "playback",
+      description: track ? `${track.title} — ${track.artist}` : undefined,
+    });
+  };
+
+  /** Shuffle and repeat answer to S and R as well as to the buttons, and a
+      keystroke changes a state you may not be looking at. */
+  const toggleShuffle = () => {
+    setShuffle(!shuffle);
+    gooeyToast(shuffle ? "Shuffle off" : "Shuffle on", { id: "shuffle" });
+  };
+
+  const toggleRepeat = () => {
+    setRepeat(!repeat);
+    gooeyToast(repeat ? "Repeat off" : "Repeat on", {
+      id: "repeat",
+      description: repeat ? undefined : "The queue starts over at the end.",
+    });
+  };
 
   /** The queue comes back with the view, but only where there is room for it. */
   const openFull = (withQueue: boolean) => {
@@ -127,7 +156,7 @@ export default function Player({
     audioSrc(track)
       .then((src) => {
         if (cancelled || !audioRef.current) return;
-        if (!src) return setError("No playable audio for this track.");
+        if (!src) return fail("No playable audio for this track.");
         if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
         objectUrl.current = src.startsWith("blob:") ? src : null;
         audioRef.current.src = src;
@@ -146,7 +175,7 @@ export default function Player({
       .catch(
         (e) =>
           !cancelled &&
-          setError(e instanceof Error ? e.message : "Could not load audio."),
+          fail(e instanceof Error ? e.message : "Could not load audio."),
       )
       .finally(() => !cancelled && setLoading(false));
 
@@ -315,10 +344,10 @@ export default function Player({
           return setMuted((m) => !m);
         case "KeyS":
           e.preventDefault();
-          return setShuffle(!shuffle);
+          return toggleShuffle();
         case "KeyR":
           e.preventDefault();
-          return setRepeat(!repeat);
+          return toggleRepeat();
         case "Home":
           e.preventDefault();
           return to(0);
@@ -375,7 +404,7 @@ export default function Player({
           if (b.length) setBuffered(b.end(b.length - 1));
         }}
         onEnded={next}
-        onError={() => setError("Playback failed.")}
+        onError={() => fail("Playback failed.")}
       />
 
       {full && (
@@ -394,9 +423,9 @@ export default function Player({
           next={next}
           prev={prev}
           shuffle={shuffle}
-          setShuffle={setShuffle}
+          toggleShuffle={toggleShuffle}
           repeat={repeat}
-          setRepeat={setRepeat}
+          toggleRepeat={toggleRepeat}
           volume={volume}
           setVolume={setVolume}
           muted={muted}
@@ -498,7 +527,7 @@ export default function Player({
             <div className="flex items-center gap-1">
               <span className="hidden sm:block">
                 <Btn
-                  onClick={() => setShuffle(!shuffle)}
+                  onClick={toggleShuffle}
                   active={shuffle}
                   label="Shuffle"
                 >
@@ -525,7 +554,7 @@ export default function Player({
               </Btn>
               <span className="hidden sm:block">
                 <Btn
-                  onClick={() => setRepeat(!repeat)}
+                  onClick={toggleRepeat}
                   active={repeat}
                   label="Repeat"
                 >
@@ -607,9 +636,9 @@ function FullView({
   next,
   prev,
   shuffle,
-  setShuffle,
+  toggleShuffle,
   repeat,
-  setRepeat,
+  toggleRepeat,
   volume,
   setVolume,
   muted,
@@ -633,9 +662,9 @@ function FullView({
   next: () => void;
   prev: () => void;
   shuffle: boolean;
-  setShuffle: (s: boolean) => void;
+  toggleShuffle: () => void;
   repeat: boolean;
-  setRepeat: (r: boolean) => void;
+  toggleRepeat: () => void;
   volume: number;
   setVolume: (v: number) => void;
   muted: boolean;
@@ -815,7 +844,7 @@ function FullView({
 
             <div className="mt-5 flex items-center gap-5">
               <Btn
-                onClick={() => setShuffle(!shuffle)}
+                onClick={toggleShuffle}
                 active={shuffle}
                 label="Shuffle"
               >
@@ -840,7 +869,7 @@ function FullView({
                 <TbPlayerSkipForwardFilled size={18} />
               </Btn>
               <Btn
-                onClick={() => setRepeat(!repeat)}
+                onClick={toggleRepeat}
                 active={repeat}
                 label="Repeat"
               >
