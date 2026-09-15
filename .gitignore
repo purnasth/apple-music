@@ -46,4 +46,5 @@ next-env.d.ts
 # Deployed as static assets straight from the build, never committed (840 MB).
 /public/songs/
 /public/songs-art/
+/public/songs-lyrics/
 /public/songs.json

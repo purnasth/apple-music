@@ -5,6 +5,7 @@ import {
   TbArrowsMaximize,
   TbArrowsShuffle,
   TbChevronLeft,
+  TbMicrophone2,
   TbMusic,
   TbPlayerPauseFilled,
   TbPlayerPlayFilled,
@@ -27,6 +28,7 @@ import {
   saveSessionTime,
   shuffled,
 } from "@/lib/music";
+import { Line, Lyrics, getLyrics, lineAt } from "@/lib/lyrics";
 import Image from "next/image";
 
 /** Feeds the styled range its filled (and buffered) proportion; see .range in globals.css. */
@@ -67,6 +69,7 @@ export default function Player({
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
+  const [showLyrics, setShowLyrics] = useState(false);
   const [loading, setLoading] = useState(false);
   const [order, setOrder] = useState<number[] | null>(null);
 
@@ -432,6 +435,8 @@ export default function Player({
           setMuted={setMuted}
           showQueue={showQueue}
           setShowQueue={setShowQueue}
+          showLyrics={showLyrics}
+          setShowLyrics={setShowLyrics}
           error={error}
           onClose={() => setFull(false)}
         />
@@ -645,6 +650,8 @@ function FullView({
   setMuted,
   showQueue,
   setShowQueue,
+  showLyrics,
+  setShowLyrics,
   error,
   onClose,
 }: {
@@ -671,6 +678,8 @@ function FullView({
   setMuted: (m: boolean) => void;
   showQueue: boolean;
   setShowQueue: (s: boolean) => void;
+  showLyrics: boolean;
+  setShowLyrics: (s: boolean) => void;
   error: string | null;
   onClose: () => void;
 }) {
@@ -790,15 +799,31 @@ function FullView({
             showQueue ? "lg:translate-x-40" : "translate-x-0"
           }`}
         >
-          <div className="my-auto flex w-full max-w-lg flex-col items-center">
+          {/* With lyrics up, the words take the room: beside the cover on a wide
+              screen, in place of it on a phone, the way Apple Music lays it out. */}
+          <div
+            className={`my-auto flex w-full max-w-lg flex-col items-center ${
+              showLyrics ? "min-h-0 flex-1 lg:max-w-5xl lg:flex-row lg:gap-12" : ""
+            }`}
+          >
+          {showLyrics && (
+            <LyricsPanel key={track.id} track={track} time={time} onSeek={onSeek} />
+          )}
+          <div className={`flex w-full shrink-0 flex-col items-center ${showLyrics ? "lg:order-first lg:max-w-md" : ""}`}>
             {art ? (
               <img
                 src={art}
                 alt={`${track.album || track.title} cover`}
-                className="aspect-square w-[min(46vh,78vw)] rounded-sheet object-cover shadow-2xl shadow-black/70 ring-1 ring-white/10"
+                className={`aspect-square w-[min(46vh,78vw)] rounded-sheet object-cover shadow-2xl shadow-black/70 ring-1 ring-white/10 ${
+                  showLyrics ? "hidden lg:block" : ""
+                }`}
               />
             ) : (
-              <div className="grid aspect-square w-[min(46vh,78vw)] place-items-center rounded-sheet bg-white/10 text-white/40 ring-1 ring-white/10">
+              <div
+                className={`grid aspect-square w-[min(46vh,78vw)] place-items-center rounded-sheet bg-white/10 text-white/40 ring-1 ring-white/10 ${
+                  showLyrics ? "hidden lg:grid" : ""
+                }`}
+              >
                 <TbMusic size={96} />
               </div>
             )}
@@ -875,6 +900,13 @@ function FullView({
               >
                 <TbRepeat size={18} />
               </Btn>
+              <Btn
+                onClick={() => setShowLyrics(!showLyrics)}
+                active={showLyrics}
+                label="Lyrics"
+              >
+                <TbMicrophone2 size={18} />
+              </Btn>
             </div>
 
             <span className="mt-6 hidden items-center gap-2 sm:flex">
@@ -903,8 +935,81 @@ function FullView({
               />
             </span>
           </div>
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Timed lines follow the song and seek on click; a plain sheet just reads. */
+function LyricsPanel({
+  track,
+  time,
+  onSeek,
+}: {
+  track: Track;
+  time: number;
+  onSeek: (t: number) => void;
+}) {
+  const [lyrics, setLyrics] = useState<Lyrics | null | undefined>();
+  const active = useRef<HTMLButtonElement>(null);
+
+  // Keyed on the track by the parent, so a new song is a fresh panel.
+  useEffect(() => {
+    let gone = false;
+    getLyrics(track)
+      .then((l) => !gone && setLyrics(l))
+      .catch(() => !gone && setLyrics(null));
+    return () => void (gone = true);
+  }, [track]);
+
+  const lines: Line[] | undefined = lyrics && "lines" in lyrics ? lyrics.lines : undefined;
+  const plain = lyrics && "plain" in lyrics ? lyrics.plain : undefined;
+  // The line that is being sung: a little ahead of the clock, as the eye lands
+  // before the voice does.
+  const at = lines ? lineAt(lines, time + 0.3) : -1;
+
+  // ponytail: always follows the song; pause following while the listener scrolls
+  // if that ever annoys.
+  useEffect(() => {
+    active.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [at]);
+
+  return (
+    <div
+      className="min-h-0 w-full min-w-0 flex-1 overflow-y-auto overscroll-contain py-32 text-left [mask-image:linear-gradient(transparent,black_15%,black_85%,transparent)] lg:h-[70vh] lg:py-[30vh]"
+      aria-live="off"
+    >
+      {lyrics === undefined ? (
+        <p className="text-sm text-white/50">Looking for lyrics…</p>
+      ) : lyrics === null ? (
+        <p className="text-sm text-white/50">No lyrics found for this song.</p>
+      ) : lines ? (
+        <ol>
+          {lines.map((l, i) => (
+            <li key={i}>
+              <button
+                ref={i === at ? active : undefined}
+                onClick={() => onSeek(l.t)}
+                className={`block w-full rounded-lg px-2 py-1.5 text-left text-2xl font-bold tracking-tight transition-all duration-300 hover:bg-white/10 lg:text-3xl ${
+                  i === at
+                    ? "scale-100 text-white"
+                    : i < at
+                      ? "scale-95 text-white/35"
+                      : "scale-95 text-white/55"
+                } origin-left`}
+              >
+                {l.text || "♪"}
+              </button>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="whitespace-pre-line px-2 text-xl font-semibold leading-relaxed text-white/85 lg:text-2xl">
+          {plain}
+        </p>
+      )}
     </div>
   );
 }

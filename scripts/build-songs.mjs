@@ -16,6 +16,7 @@ import { parseFile } from 'music-metadata';
 const run = promisify(execFile);
 const SONGS = 'public/songs';
 const ART = 'public/songs-art';
+const LYRICS = 'public/songs-lyrics';
 const AUDIO = /\.(mp3|m4a|flac|wav|ogg|opus|aac)$/i;
 
 const walk = async (dir) => {
@@ -29,35 +30,51 @@ const walk = async (dir) => {
   return out;
 };
 
-await rm(ART, { recursive: true, force: true });
+// Deliberately not wiping ART first. It used to, and an interrupted run then
+// left songs.json — written at the very end — pointing at covers that had just
+// been deleted, so most of the library rendered 404s. Write the new set over
+// the old, then prune what is no longer referenced once it is safely on disk.
 await mkdir(ART, { recursive: true });
+await mkdir(LYRICS, { recursive: true });
 
 const files = (await walk(SONGS)).sort();
 const tracks = [];
-const seen = new Set();
+/** hash -> whether its two sizes are actually on disk. */
+const covers = new Map();
+/** Lyrics files written this run, so the prune below keeps them. */
+const lyricsKeep = new Set();
+const failed = [];
 
 for (const file of files) {
   const parts = relative(SONGS, file).split('/');
   let title = parts.at(-1).replace(/\.[^.]+$/, '');
   let artist = 'Unknown artist';
   let album = '';
-  let duration, artwork, artworkLarge;
+  let duration, artwork, artworkLarge, lyrics;
 
+  let pic, words;
   try {
     const { common, format } = await parseFile(file, { duration: true });
     if (common.title) title = common.title;
     if (common.artist) artist = common.artist;
     if (common.album) album = common.album;
     duration = format.duration;
-    const pic = common.picture?.[0];
-    if (pic) {
-      const hash = createHash('sha1').update(pic.data).digest('hex').slice(0, 16);
-      artwork = `/songs-art/${hash}.jpg`;
-      artworkLarge = `/songs-art/${hash}-lg.jpg`;
-      // Album art repeats across a record, so hash-name it and convert each one once.
-      if (!seen.has(hash)) {
-        seen.add(hash);
-        const raw = join(ART, `.raw-${hash}`);
+    pic = common.picture?.[0];
+    // Apple Music downloads carry the words as plain text (never timed); kept as
+    // their own file so a queue saved to localStorage does not carry a lyric sheet
+    // per track. Timed lyrics come from LRCLIB at play time — see lib/lyrics.ts.
+    const l = common.lyrics?.[0];
+    words = (typeof l === 'string' ? l : l?.text)?.trim();
+  } catch {
+    // Unreadable tags aren't fatal — the filename still names the track.
+  }
+
+  if (pic) {
+    const hash = createHash('sha1').update(pic.data).digest('hex').slice(0, 16);
+    // Album art repeats across a record, so hash-name it and convert each one once.
+    if (!covers.has(hash)) {
+      const raw = join(ART, `.raw-${hash}`);
+      try {
         await writeFile(raw, pic.data);
         // 200px covers the 40px list thumbnail and 64px player art even at 2x DPI;
         // the @lg copy is only fetched when the fullscreen view opens.
@@ -66,11 +83,29 @@ for (const file of files) {
           await run('sips', ['-Z', String(px), '-s', 'format', 'jpeg', '-s', 'formatOptions', String(q),
             raw, '--out', join(ART, `${hash}${suffix}.jpg`)]);
         }
-        await rm(raw);
+        covers.set(hash, true);
+      } catch (e) {
+        // Its own failure, separate from the tags: a cover that will not convert
+        // must not cost the track its title and artist as well.
+        covers.set(hash, false);
+        failed.push(`${title} — ${String(e.message ?? e).split('\n')[0]}`);
+      } finally {
+        await rm(raw, { force: true });
       }
     }
-  } catch {
-    // Unreadable tags aren't fatal — the filename still names the track.
+    // Only point at a file that exists. Naming it before the conversion is what
+    // turned a sips failure into a 404 that nothing reported.
+    if (covers.get(hash)) {
+      artwork = `/songs-art/${hash}.jpg`;
+      artworkLarge = `/songs-art/${hash}-lg.jpg`;
+    }
+  }
+
+  if (words) {
+    const name = `${createHash('sha1').update(words).digest('hex').slice(0, 16)}.txt`;
+    await writeFile(join(LYRICS, name), words);
+    lyricsKeep.add(name);
+    lyrics = `/songs-lyrics/${name}`;
   }
 
   tracks.push({
@@ -86,6 +121,7 @@ for (const file of files) {
     // song. Old versions linger in the cache until its activate cleanup.
     preview: `/songs/${parts.map(encodeURIComponent).join('/')}?v=${(await stat(file)).size}`,
     duration,
+    lyrics,
     folder: parts.length > 1 ? parts.at(-2) : undefined,
   });
 }
@@ -93,6 +129,21 @@ for (const file of files) {
 tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 await writeFile('public/songs.json', JSON.stringify(tracks));
 
-const names = [...seen].flatMap((h) => [`${h}.jpg`, `${h}-lg.jpg`]);
+// Now that every cover this manifest names is on disk, drop the rest — covers
+// of songs since removed, and any .raw- scratch file a killed run left behind.
+const written = [...covers].filter(([, ok]) => ok).map(([h]) => h);
+const names = written.flatMap((h) => [`${h}.jpg`, `${h}-lg.jpg`]);
+const keep = new Set(names);
+for (const name of await readdir(ART)) {
+  if (!keep.has(name)) await rm(join(ART, name), { force: true });
+}
+for (const name of await readdir(LYRICS)) {
+  if (!lyricsKeep.has(name)) await rm(join(LYRICS, name), { force: true });
+}
+
 const artBytes = (await Promise.all(names.map((n) => stat(join(ART, n))))).reduce((s, f) => s + f.size, 0);
-console.log(`${tracks.length} tracks, ${seen.size} covers at two sizes (${(artBytes / 1e6).toFixed(1)} MB)`);
+console.log(`${tracks.length} tracks, ${written.length} covers at two sizes (${(artBytes / 1e6).toFixed(1)} MB), ${lyricsKeep.size} lyric sheets`);
+if (failed.length) {
+  console.warn(`\n${failed.length} cover(s) could not be converted; those tracks ship without art:`);
+  for (const f of failed) console.warn(`  ${f}`);
+}

@@ -63,6 +63,7 @@ free tier. Until then the switch above is the whole answer.
 |---|---|
 | audio | `public/songs/<folder>/` — drop files here, gitignored |
 | covers | `public/songs-art`, generated, gitignored |
+| lyrics | `public/songs-lyrics`, plain text pulled from the files, generated, gitignored |
 | manifest | `public/songs.json`, generated, gitignored |
 | in git | `scripts/build-songs.mjs`, ~4 KB |
 
