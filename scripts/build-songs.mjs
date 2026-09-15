@@ -29,12 +29,17 @@ const walk = async (dir) => {
   return out;
 };
 
-await rm(ART, { recursive: true, force: true });
+// Deliberately not wiping ART first. It used to, and an interrupted run then
+// left songs.json — written at the very end — pointing at covers that had just
+// been deleted, so most of the library rendered 404s. Write the new set over
+// the old, then prune what is no longer referenced once it is safely on disk.
 await mkdir(ART, { recursive: true });
 
 const files = (await walk(SONGS)).sort();
 const tracks = [];
-const seen = new Set();
+/** hash -> whether its two sizes are actually on disk. */
+const covers = new Map();
+const failed = [];
 
 for (const file of files) {
   const parts = relative(SONGS, file).split('/');
@@ -43,21 +48,24 @@ for (const file of files) {
   let album = '';
   let duration, artwork, artworkLarge;
 
+  let pic;
   try {
     const { common, format } = await parseFile(file, { duration: true });
     if (common.title) title = common.title;
     if (common.artist) artist = common.artist;
     if (common.album) album = common.album;
     duration = format.duration;
-    const pic = common.picture?.[0];
-    if (pic) {
-      const hash = createHash('sha1').update(pic.data).digest('hex').slice(0, 16);
-      artwork = `/songs-art/${hash}.jpg`;
-      artworkLarge = `/songs-art/${hash}-lg.jpg`;
-      // Album art repeats across a record, so hash-name it and convert each one once.
-      if (!seen.has(hash)) {
-        seen.add(hash);
-        const raw = join(ART, `.raw-${hash}`);
+    pic = common.picture?.[0];
+  } catch {
+    // Unreadable tags aren't fatal — the filename still names the track.
+  }
+
+  if (pic) {
+    const hash = createHash('sha1').update(pic.data).digest('hex').slice(0, 16);
+    // Album art repeats across a record, so hash-name it and convert each one once.
+    if (!covers.has(hash)) {
+      const raw = join(ART, `.raw-${hash}`);
+      try {
         await writeFile(raw, pic.data);
         // 200px covers the 40px list thumbnail and 64px player art even at 2x DPI;
         // the @lg copy is only fetched when the fullscreen view opens.
@@ -66,11 +74,22 @@ for (const file of files) {
           await run('sips', ['-Z', String(px), '-s', 'format', 'jpeg', '-s', 'formatOptions', String(q),
             raw, '--out', join(ART, `${hash}${suffix}.jpg`)]);
         }
-        await rm(raw);
+        covers.set(hash, true);
+      } catch (e) {
+        // Its own failure, separate from the tags: a cover that will not convert
+        // must not cost the track its title and artist as well.
+        covers.set(hash, false);
+        failed.push(`${title} — ${String(e.message ?? e).split('\n')[0]}`);
+      } finally {
+        await rm(raw, { force: true });
       }
     }
-  } catch {
-    // Unreadable tags aren't fatal — the filename still names the track.
+    // Only point at a file that exists. Naming it before the conversion is what
+    // turned a sips failure into a 404 that nothing reported.
+    if (covers.get(hash)) {
+      artwork = `/songs-art/${hash}.jpg`;
+      artworkLarge = `/songs-art/${hash}-lg.jpg`;
+    }
   }
 
   tracks.push({
@@ -93,6 +112,18 @@ for (const file of files) {
 tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 await writeFile('public/songs.json', JSON.stringify(tracks));
 
-const names = [...seen].flatMap((h) => [`${h}.jpg`, `${h}-lg.jpg`]);
+// Now that every cover this manifest names is on disk, drop the rest — covers
+// of songs since removed, and any .raw- scratch file a killed run left behind.
+const written = [...covers].filter(([, ok]) => ok).map(([h]) => h);
+const names = written.flatMap((h) => [`${h}.jpg`, `${h}-lg.jpg`]);
+const keep = new Set(names);
+for (const name of await readdir(ART)) {
+  if (!keep.has(name)) await rm(join(ART, name), { force: true });
+}
+
 const artBytes = (await Promise.all(names.map((n) => stat(join(ART, n))))).reduce((s, f) => s + f.size, 0);
-console.log(`${tracks.length} tracks, ${seen.size} covers at two sizes (${(artBytes / 1e6).toFixed(1)} MB)`);
+console.log(`${tracks.length} tracks, ${written.length} covers at two sizes (${(artBytes / 1e6).toFixed(1)} MB)`);
+if (failed.length) {
+  console.warn(`\n${failed.length} cover(s) could not be converted; those tracks ship without art:`);
+  for (const f of failed) console.warn(`  ${f}`);
+}
