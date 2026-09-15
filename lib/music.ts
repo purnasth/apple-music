@@ -14,6 +14,8 @@ export type Track = {
   duration?: number;
   /** Immediate parent folder when imported via the folder picker (new, OG, temp…). */
   folder?: string;
+  /** Plain lyrics the file carried, written out by the indexer; fetched when the panel opens. */
+  lyrics?: string;
 };
 
 /* ---------- Deezer search (public API, no key) ----------

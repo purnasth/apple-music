@@ -16,6 +16,7 @@ import { parseFile } from 'music-metadata';
 const run = promisify(execFile);
 const SONGS = 'public/songs';
 const ART = 'public/songs-art';
+const LYRICS = 'public/songs-lyrics';
 const AUDIO = /\.(mp3|m4a|flac|wav|ogg|opus|aac)$/i;
 
 const walk = async (dir) => {
@@ -34,11 +35,14 @@ const walk = async (dir) => {
 // been deleted, so most of the library rendered 404s. Write the new set over
 // the old, then prune what is no longer referenced once it is safely on disk.
 await mkdir(ART, { recursive: true });
+await mkdir(LYRICS, { recursive: true });
 
 const files = (await walk(SONGS)).sort();
 const tracks = [];
 /** hash -> whether its two sizes are actually on disk. */
 const covers = new Map();
+/** Lyrics files written this run, so the prune below keeps them. */
+const lyricsKeep = new Set();
 const failed = [];
 
 for (const file of files) {
@@ -46,9 +50,9 @@ for (const file of files) {
   let title = parts.at(-1).replace(/\.[^.]+$/, '');
   let artist = 'Unknown artist';
   let album = '';
-  let duration, artwork, artworkLarge;
+  let duration, artwork, artworkLarge, lyrics;
 
-  let pic;
+  let pic, words;
   try {
     const { common, format } = await parseFile(file, { duration: true });
     if (common.title) title = common.title;
@@ -56,6 +60,11 @@ for (const file of files) {
     if (common.album) album = common.album;
     duration = format.duration;
     pic = common.picture?.[0];
+    // Apple Music downloads carry the words as plain text (never timed); kept as
+    // their own file so a queue saved to localStorage does not carry a lyric sheet
+    // per track. Timed lyrics come from LRCLIB at play time — see lib/lyrics.ts.
+    const l = common.lyrics?.[0];
+    words = (typeof l === 'string' ? l : l?.text)?.trim();
   } catch {
     // Unreadable tags aren't fatal — the filename still names the track.
   }
@@ -92,6 +101,13 @@ for (const file of files) {
     }
   }
 
+  if (words) {
+    const name = `${createHash('sha1').update(words).digest('hex').slice(0, 16)}.txt`;
+    await writeFile(join(LYRICS, name), words);
+    lyricsKeep.add(name);
+    lyrics = `/songs-lyrics/${name}`;
+  }
+
   tracks.push({
     // Each path segment encoded separately: these names carry spaces, commas and parentheses.
     id: `file:${parts.join('/')}`,
@@ -105,6 +121,7 @@ for (const file of files) {
     // song. Old versions linger in the cache until its activate cleanup.
     preview: `/songs/${parts.map(encodeURIComponent).join('/')}?v=${(await stat(file)).size}`,
     duration,
+    lyrics,
     folder: parts.length > 1 ? parts.at(-2) : undefined,
   });
 }
@@ -120,9 +137,12 @@ const keep = new Set(names);
 for (const name of await readdir(ART)) {
   if (!keep.has(name)) await rm(join(ART, name), { force: true });
 }
+for (const name of await readdir(LYRICS)) {
+  if (!lyricsKeep.has(name)) await rm(join(LYRICS, name), { force: true });
+}
 
 const artBytes = (await Promise.all(names.map((n) => stat(join(ART, n))))).reduce((s, f) => s + f.size, 0);
-console.log(`${tracks.length} tracks, ${written.length} covers at two sizes (${(artBytes / 1e6).toFixed(1)} MB)`);
+console.log(`${tracks.length} tracks, ${written.length} covers at two sizes (${(artBytes / 1e6).toFixed(1)} MB), ${lyricsKeep.size} lyric sheets`);
 if (failed.length) {
   console.warn(`\n${failed.length} cover(s) could not be converted; those tracks ship without art:`);
   for (const f of failed) console.warn(`  ${f}`);

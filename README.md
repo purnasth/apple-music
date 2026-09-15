@@ -17,6 +17,9 @@ with no database, no accounts, and no backend to run.
   works offline.
 - **Playlists** stored in `localStorage`, freely mixing catalogue tracks and
   your own files.
+- **Lyrics** in the full-screen view: time-synced lines from
+  [LRCLIB](https://lrclib.net) that follow the song and seek on click, falling
+  back to the plain lyrics embedded in your own files.
 
 ## A note on catalogue playback
 
@@ -60,5 +63,6 @@ Or directly: `npx wrangler pages deploy out`
 app/page.tsx          search, library and playlist UI
 components/Player.tsx player bar, playback and MediaSession wiring
 lib/music.ts          search, IndexedDB library, playlist persistence
+lib/lyrics.ts         LRC parsing and the LRCLIB lookup
 lib/music.test.ts     smoke tests
 ```
