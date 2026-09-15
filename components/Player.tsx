@@ -12,6 +12,7 @@ import {
   TbPlayerSkipForwardFilled,
   TbPlaylist,
   TbRepeat,
+  TbRepeatOnce,
   TbVolume,
   TbVolumeOff,
   TbX,
@@ -19,6 +20,7 @@ import {
 import { toast } from "@/lib/toast";
 import {
   Track,
+  type Repeat,
   audioSrc,
   fmtTime,
   getSession,
@@ -28,6 +30,11 @@ import {
   shuffled,
 } from "@/lib/music";
 import Image from "next/image";
+
+/** The control says which of the three states it is in, for a screen reader and
+    for the tooltip, since the icon only distinguishes one of them. */
+const repeatLabel = (r: Repeat) =>
+  r === "one" ? "Repeat one" : r === "all" ? "Repeat all" : "Repeat off";
 
 /** Feeds the styled range its filled (and buffered) proportion; see .range in globals.css. */
 const filled = (value: number, max: number, buffered = 0) =>
@@ -62,7 +69,7 @@ export default function Player({
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(init?.volume ?? 1);
   const [muted, setMuted] = useState(init?.muted ?? false);
-  const [repeat, setRepeat] = useState(init?.repeat ?? false);
+  const [repeat, setRepeat] = useState<Repeat>(init?.repeat ?? "off");
   const [shuffle, setShuffle] = useState(init?.shuffle ?? false);
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
@@ -92,12 +99,26 @@ export default function Player({
     toast(shuffle ? "Shuffle off" : "Shuffle on", { id: "shuffle" });
   };
 
+  /**
+   * Three states, the way every player has them. It used to be a boolean that
+   * meant "start the queue over at the very end", so pressing it on track 3 of
+   * 178 did nothing observable for hours — which is what made it look broken.
+   */
   const toggleRepeat = () => {
-    setRepeat(!repeat);
-    toast(repeat ? "Repeat off" : "Repeat on", {
-      id: "repeat",
-      description: repeat ? undefined : "The queue starts over at the end.",
-    });
+    const to: Repeat = repeat === "off" ? "all" : repeat === "all" ? "one" : "off";
+    setRepeat(to);
+    toast(
+      to === "off" ? "Repeat off" : to === "all" ? "Repeat all" : "Repeat one",
+      {
+        id: "repeat",
+        description:
+          to === "all"
+            ? "The queue starts over at the end."
+            : to === "one"
+              ? "This track plays on a loop."
+              : undefined,
+      },
+    );
   };
 
   /** The queue comes back with the view, but only where there is room for it. */
@@ -124,13 +145,36 @@ export default function Player({
     if (nxt?.preview?.startsWith("/songs/")) fetch(nxt.preview).catch(() => {});
   }, [index, order, queue]);
 
+  /**
+   * Moving to the index already playing is a state update React discards, so
+   * the load effect never re-runs and the track never restarts. A one-track
+   * queue on repeat just went silent. Restart the element instead.
+   */
+  const goTo = (i: number) => {
+    if (i !== index) return setIndex(i);
+    const a = audioRef.current;
+    if (!a) return;
+    a.currentTime = 0;
+    setTime(0);
+    a.play().catch(() => setPlaying(false));
+  };
+
   /** Walk the play order, which is the shuffled one when shuffle is on. */
   const step = (delta: 1 | -1) => {
     if (!queue.length) return;
     const path = order ?? queue.map((_, i) => i);
     const at = Math.max(path.indexOf(index), 0) + delta;
-    if (at >= path.length)
-      return repeat ? setIndex(path[0]) : setPlaying(false);
+    if (at >= path.length) {
+      if (repeat === "off") return setPlaying(false);
+      // A second lap through an identical shuffle is not shuffled. Reshuffle,
+      // and hand back the first track of the new order rather than the old one.
+      if (shuffle) {
+        const fresh = shuffled(queue.map((_, i) => i));
+        setOrder(fresh);
+        return goTo(fresh[0]);
+      }
+      return goTo(path[0]);
+    }
     setIndex(path[at < 0 ? path.length - 1 : at]);
   };
 
@@ -202,6 +246,20 @@ export default function Player({
   useEffect(() => {
     if (audioRef.current) audioRef.current.muted = muted;
   }, [muted]);
+
+  // Native looping rather than restarting from onEnded: a play() call that
+  // originates in script after the track finished is exactly what iOS refuses,
+  // and `loop` never gives playback back to script in the first place. It also
+  // keeps the lock screen and the media session playing without a gap.
+  //
+  // A one-track queue set to repeat the queue is repeat-one wearing a hat, and
+  // it was the case that failed hardest: wrapping meant re-selecting the index
+  // already playing, which React discards. Let the element loop that too.
+  useEffect(() => {
+    if (audioRef.current)
+      audioRef.current.loop =
+        repeat === "one" || (repeat === "all" && queue.length === 1);
+  }, [repeat, queue.length]);
 
   // Persist the session as it changes, so the next visit resumes it (Spotify-style).
   // Playback position goes through saveSessionTime instead — see onTimeUpdate.
@@ -553,12 +611,8 @@ export default function Player({
                 <TbPlayerSkipForwardFilled />
               </Btn>
               <span className="hidden sm:block">
-                <Btn
-                  onClick={toggleRepeat}
-                  active={repeat}
-                  label="Repeat"
-                >
-                  <TbRepeat />
+                <Btn onClick={toggleRepeat} active={repeat !== "off"} label={repeatLabel(repeat)}>
+                  {repeat === "one" ? <TbRepeatOnce /> : <TbRepeat />}
                 </Btn>
               </span>
               <span className="ml-2 hidden items-center gap-2 sm:flex">
@@ -663,7 +717,7 @@ function FullView({
   prev: () => void;
   shuffle: boolean;
   toggleShuffle: () => void;
-  repeat: boolean;
+  repeat: Repeat;
   toggleRepeat: () => void;
   volume: number;
   setVolume: (v: number) => void;
@@ -868,12 +922,12 @@ function FullView({
               <Btn onClick={next} label="Next">
                 <TbPlayerSkipForwardFilled size={18} />
               </Btn>
-              <Btn
-                onClick={toggleRepeat}
-                active={repeat}
-                label="Repeat"
-              >
-                <TbRepeat size={18} />
+              <Btn onClick={toggleRepeat} active={repeat !== "off"} label={repeatLabel(repeat)}>
+                {repeat === "one" ? (
+                  <TbRepeatOnce size={18} />
+                ) : (
+                  <TbRepeat size={18} />
+                )}
               </Btn>
             </div>
 

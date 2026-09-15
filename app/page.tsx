@@ -104,7 +104,9 @@ export default function Home() {
   const [artistQuery, setArtistQuery] = useState("");
   const artistBox = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState("");
-  const [sort, setSort] = useState<SortKey>("artist");
+  // A to Z by title: the order you scan a list in when you are looking for a
+  // song by name, which is what the library is mostly used for.
+  const [sort, setSort] = useState<SortKey>("title");
 
   const [playlists, setPlaylists] = useState<Playlists>({});
   const [active, setActive] = useState<string | null>(null);

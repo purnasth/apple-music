@@ -25,7 +25,7 @@ export const SHORTCUT_GROUPS: {
       { keys: ["Shift", "N"], label: "Next track" },
       { keys: ["Shift", "P"], label: "Previous track" },
       { keys: ["S"], label: "Shuffle" },
-      { keys: ["R"], label: "Repeat" },
+      { keys: ["R"], label: "Repeat off / all / one" },
     ],
   },
   {

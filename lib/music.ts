@@ -206,13 +206,16 @@ export async function audioSrc(track: Track, signal?: AbortSignal): Promise<stri
 const SS_KEY = 'session';
 const SS_TIME_KEY = 'session-time';
 
+/** off, the whole queue again, or this one track on a loop. */
+export type Repeat = "off" | "all" | "one";
+
 export type Session = {
   queue: Track[];
   index: number;
   volume: number;
   muted: boolean;
   shuffle: boolean;
-  repeat: boolean;
+  repeat: Repeat;
   /** Position in the track at `index`, tagged with its id so a stale time never applies. */
   time?: { id: string; t: number };
 };
@@ -222,6 +225,8 @@ export function getSession(): Session | null {
   try {
     const s = JSON.parse(localStorage.getItem(SS_KEY) ?? 'null') as Session | null;
     if (!s?.queue?.length) return null;
+    // Repeat was a boolean before it had three states; true meant the queue.
+    if (typeof s.repeat === 'boolean') s.repeat = s.repeat ? 'all' : 'off';
     s.time = JSON.parse(localStorage.getItem(SS_TIME_KEY) ?? 'null') ?? undefined;
     return s;
   } catch {
