@@ -299,7 +299,10 @@ export default function Player({
       }
 
       switch (e.code) {
+        // Steps down one layer at a time, the way F does, rather than throwing
+        // away the whole view when all you wanted was the words gone.
         case "Escape":
+          if (showLyrics) return setShowLyrics(false);
           return setFull(false);
         case "Space":
         case "KeyK":
@@ -362,7 +365,17 @@ export default function Player({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [full, showQueue, playing, shuffle, repeat, track, index, queue]);
+  }, [
+    full,
+    showQueue,
+    showLyrics,
+    playing,
+    shuffle,
+    repeat,
+    track,
+    index,
+    queue,
+  ]);
 
   // The page behind must not scroll while the overlay covers it.
   useEffect(() => {
@@ -531,11 +544,7 @@ export default function Player({
 
             <div className="flex items-center gap-1">
               <span className="hidden sm:block">
-                <Btn
-                  onClick={toggleShuffle}
-                  active={shuffle}
-                  label="Shuffle"
-                >
+                <Btn onClick={toggleShuffle} active={shuffle} label="Shuffle">
                   <TbArrowsShuffle />
                 </Btn>
               </span>
@@ -558,11 +567,7 @@ export default function Player({
                 <TbPlayerSkipForwardFilled />
               </Btn>
               <span className="hidden sm:block">
-                <Btn
-                  onClick={toggleRepeat}
-                  active={repeat}
-                  label="Repeat"
-                >
+                <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
                   <TbRepeat />
                 </Btn>
               </span>
@@ -697,8 +702,14 @@ function FullView({
         />
       )}
       {/* The Clear variant floats over media; artwork can be bright, so it gets a
-          dimming layer to keep the controls legible (HIG — Liquid Glass > Clear). */}
-      <div className="pointer-events-none absolute inset-0 bg-black/55" />
+          dimming layer to keep the controls legible (HIG — Liquid Glass > Clear).
+          It deepens for the lyrics, which are long-form reading over a moving
+          backdrop rather than a few words — dim to focus. */}
+      <div
+        className={`pointer-events-none absolute inset-0 transition-colors duration-500 ease-glide ${
+          showLyrics ? "bg-black/72" : "bg-black/55"
+        }`}
+      />
 
       <button
         onClick={onClose}
@@ -795,146 +806,142 @@ function FullView({
         </button>
 
         <div
-          className={`flex min-w-0 flex-1 flex-col items-center overflow-y-auto px-4 py-16 transition-transform duration-300 ease-out sm:px-6 ${
-            showQueue ? "lg:translate-x-40" : "translate-x-0"
-          }`}
+          // pt-16 with the words up: on a phone the identity row becomes the
+          // header, and it has to start below the queue and close buttons
+          // floating at top-5 rather than underneath them.
+          className={`flex min-w-0 flex-1 flex-col items-center px-4 pb-10 transition-transform duration-300 ease-out sm:px-6 sm:pb-16 sm:pt-16 ${
+            showLyrics ? "overflow-hidden pt-16" : "overflow-y-auto pt-10"
+          } ${showQueue ? "lg:translate-x-40" : "translate-x-0"}`}
         >
-          {/* With lyrics up, the words take the room: beside the cover on a wide
-              screen, in place of it on a phone, the way Apple Music lays it out. */}
-          <div
-            className={`my-auto flex w-full max-w-lg flex-col items-center ${
-              showLyrics ? "min-h-0 flex-1 lg:max-w-5xl lg:flex-row lg:gap-12" : ""
-            }`}
-          >
-          {showLyrics && (
-            <LyricsPanel key={track.id} track={track} time={time} onSeek={onSeek} />
-          )}
-          <div className={`flex w-full shrink-0 flex-col items-center ${showLyrics ? "lg:order-first lg:max-w-md" : ""}`}>
-            {art ? (
-              <img
-                src={art}
-                alt={`${track.album || track.title} cover`}
-                className={`aspect-square w-[min(46vh,78vw)] rounded-sheet object-cover shadow-2xl shadow-black/70 ring-1 ring-white/10 ${
-                  showLyrics ? "hidden lg:block" : ""
-                }`}
-              />
-            ) : (
-              <div
-                className={`grid aspect-square w-[min(46vh,78vw)] place-items-center rounded-sheet bg-white/10 text-white/40 ring-1 ring-white/10 ${
-                  showLyrics ? "hidden lg:grid" : ""
-                }`}
-              >
-                <TbMusic size={96} />
+          {/* Three blocks, laid out by .stage in globals.css: identity, the words,
+              the transport. Opening the lyrics re-forms the composition rather
+              than hiding half of it — on a phone the cover shrinks to a thumbnail
+              beside the title, on a desktop it keeps its column and the words take
+              the one beside it. */}
+          <div className="stage" data-lyrics={showLyrics || undefined}>
+            <div className="stage-id">
+              {art ? (
+                <img
+                  src={art}
+                  alt={`${track.album || track.title} cover`}
+                  className="stage-art aspect-square shrink-0 object-cover shadow-2xl shadow-black/70 ring-1 ring-white/10"
+                />
+              ) : (
+                <div className="stage-art grid aspect-square shrink-0 place-items-center bg-white/10 text-white/40 ring-1 ring-white/10">
+                  <TbMusic className="h-2/5 w-2/5" />
+                </div>
+              )}
+
+              <div className="stage-meta">
+                <h2 className="stage-title truncate">{track.title}</h2>
+                <p className="mt-1 truncate text-sm text-white/70">
+                  {track.artist}
+                  {isPreview(track) ? " · 30s preview" : ""}
+                </p>
+                {track.album && (
+                  <p className="stage-aside mt-0.5 truncate text-xs text-white/50">
+                    {track.album}
+                  </p>
+                )}
+                {loading && (
+                  <p className="stage-aside mt-2 text-xs text-white/60">
+                    Loading…
+                  </p>
+                )}
+                {error && <p className="mt-2 text-sm text-accent">{error}</p>}
               </div>
+            </div>
+
+            {showLyrics && (
+              <LyricsPanel
+                key={track.id}
+                track={track}
+                time={time}
+                onSeek={onSeek}
+              />
             )}
 
-            <div className="mt-6 w-full text-center">
-              <h2 className="truncate text-2xl font-semibold tracking-tight">
-                {track.title}
-              </h2>
-              <p className="mt-1 truncate text-sm text-white/70">
-                {track.artist}
-                {isPreview(track) ? " · 30s preview" : ""}
-              </p>
-              {track.album && (
-                <p className="mt-0.5 truncate text-xs text-white/50">
-                  {track.album}
-                </p>
-              )}
-              {loading && (
-                <p className="mt-2 text-xs text-white/60">Loading…</p>
-              )}
-              {error && <p className="mt-2 text-sm text-accent">{error}</p>}
-            </div>
+            <div className="stage-ctl">
+              <div className="mt-5 flex w-full items-center gap-3">
+                <span className="w-10 text-right text-xs tabular-nums text-white/60">
+                  {fmtTime(time)}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={dur}
+                  value={time}
+                  step={0.1}
+                  onChange={(e) => onSeek(Number(e.target.value))}
+                  className="range range-light flex-1"
+                  style={filled(time, dur, buffered)}
+                  aria-label="Seek"
+                />
+                <span className="w-10 text-xs tabular-nums text-white/60">
+                  {fmtTime(dur)}
+                </span>
+              </div>
 
-            <div className="mt-5 flex w-full items-center gap-3">
-              <span className="w-10 text-right text-xs tabular-nums text-white/60">
-                {fmtTime(time)}
+              <div className="mt-5 flex items-center gap-5">
+                <Btn onClick={toggleShuffle} active={shuffle} label="Shuffle">
+                  <TbArrowsShuffle size={18} />
+                </Btn>
+                <Btn onClick={prev} label="Previous">
+                  <TbPlayerSkipBackFilled size={18} />
+                </Btn>
+                <button
+                  onClick={() => setPlaying(!playing)}
+                  aria-label={playing ? "Pause" : "Play"}
+                  title={playing ? "Pause" : "Play"}
+                  className="grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 transition hover:scale-105 active:scale-95"
+                >
+                  {playing ? (
+                    <TbPlayerPauseFilled size={22} />
+                  ) : (
+                    <TbPlayerPlayFilled size={22} className="ml-1" />
+                  )}
+                </button>
+                <Btn onClick={next} label="Next">
+                  <TbPlayerSkipForwardFilled size={18} />
+                </Btn>
+                <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
+                  <TbRepeat size={18} />
+                </Btn>
+                <Btn
+                  onClick={() => setShowLyrics(!showLyrics)}
+                  active={showLyrics}
+                  label="Lyrics"
+                >
+                  <TbMicrophone2 size={18} />
+                </Btn>
+              </div>
+
+              <span className="mt-6 hidden items-center gap-2 sm:flex">
+                <button
+                  onClick={() => setMuted(!muted)}
+                  aria-label={muted ? "Unmute" : "Mute"}
+                  title={muted ? "Unmute (M)" : "Mute (M)"}
+                  aria-pressed={muted}
+                  className="shrink-0 text-white/60 transition hover:text-white"
+                >
+                  {muted ? <TbVolumeOff size={16} /> : <TbVolume size={16} />}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={muted ? 0 : volume}
+                  onChange={(e) => {
+                    setMuted(false);
+                    setVolume(Number(e.target.value));
+                  }}
+                  className="range range-light w-40"
+                  style={filled(muted ? 0 : volume, 1)}
+                  aria-label="Volume"
+                />
               </span>
-              <input
-                type="range"
-                min={0}
-                max={dur}
-                value={time}
-                step={0.1}
-                onChange={(e) => onSeek(Number(e.target.value))}
-                className="range range-light flex-1"
-                style={filled(time, dur, buffered)}
-                aria-label="Seek"
-              />
-              <span className="w-10 text-xs tabular-nums text-white/60">
-                {fmtTime(dur)}
-              </span>
             </div>
-
-            <div className="mt-5 flex items-center gap-5">
-              <Btn
-                onClick={toggleShuffle}
-                active={shuffle}
-                label="Shuffle"
-              >
-                <TbArrowsShuffle size={18} />
-              </Btn>
-              <Btn onClick={prev} label="Previous">
-                <TbPlayerSkipBackFilled size={18} />
-              </Btn>
-              <button
-                onClick={() => setPlaying(!playing)}
-                aria-label={playing ? "Pause" : "Play"}
-                title={playing ? "Pause" : "Play"}
-                className="grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 transition hover:scale-105 active:scale-95"
-              >
-                {playing ? (
-                  <TbPlayerPauseFilled size={22} />
-                ) : (
-                  <TbPlayerPlayFilled size={22} className="ml-1" />
-                )}
-              </button>
-              <Btn onClick={next} label="Next">
-                <TbPlayerSkipForwardFilled size={18} />
-              </Btn>
-              <Btn
-                onClick={toggleRepeat}
-                active={repeat}
-                label="Repeat"
-              >
-                <TbRepeat size={18} />
-              </Btn>
-              <Btn
-                onClick={() => setShowLyrics(!showLyrics)}
-                active={showLyrics}
-                label="Lyrics"
-              >
-                <TbMicrophone2 size={18} />
-              </Btn>
-            </div>
-
-            <span className="mt-6 hidden items-center gap-2 sm:flex">
-              <button
-                onClick={() => setMuted(!muted)}
-                aria-label={muted ? "Unmute" : "Mute"}
-                title={muted ? "Unmute (M)" : "Mute (M)"}
-                aria-pressed={muted}
-                className="shrink-0 text-white/60 transition hover:text-white"
-              >
-                {muted ? <TbVolumeOff size={16} /> : <TbVolume size={16} />}
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={muted ? 0 : volume}
-                onChange={(e) => {
-                  setMuted(false);
-                  setVolume(Number(e.target.value));
-                }}
-                className="range range-light w-40"
-                style={filled(muted ? 0 : volume, 1)}
-                aria-label="Volume"
-              />
-            </span>
-          </div>
           </div>
         </div>
       </div>
@@ -942,7 +949,14 @@ function FullView({
   );
 }
 
-/** Timed lines follow the song and seek on click; a plain sheet just reads. */
+/**
+ * The words, following the song. Timed lines light up one at a time and seek when
+ * tapped; a sheet with no timings is shown as a sheet and says so.
+ *
+ * Hierarchy is opacity alone — never weight. Bolding the current line would re-wrap
+ * it and shove everything below it sideways on every beat, which is the jitter that
+ * makes a lyrics view feel cheap.
+ */
 function LyricsPanel({
   track,
   time,
@@ -953,9 +967,13 @@ function LyricsPanel({
   onSeek: (t: number) => void;
 }) {
   const [lyrics, setLyrics] = useState<Lyrics | null | undefined>();
+  const box = useRef<HTMLDivElement>(null);
   const active = useRef<HTMLButtonElement>(null);
+  /** Set while the listener is scrolling for themselves; following stops until they stop. */
+  const [held, setHeld] = useState(false);
+  const release = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Keyed on the track by the parent, so a new song is a fresh panel.
+  // Keyed on the track by the parent, so a new song arrives as a fresh panel.
   useEffect(() => {
     let gone = false;
     getLyrics(track)
@@ -964,52 +982,151 @@ function LyricsPanel({
     return () => void (gone = true);
   }, [track]);
 
-  const lines: Line[] | undefined = lyrics && "lines" in lyrics ? lyrics.lines : undefined;
+  useEffect(() => () => clearTimeout(release.current), []);
+
+  const lines: Line[] | undefined =
+    lyrics && "lines" in lyrics && lyrics.lines.length
+      ? lyrics.lines
+      : undefined;
   const plain = lyrics && "plain" in lyrics ? lyrics.plain : undefined;
-  // The line that is being sung: a little ahead of the clock, as the eye lands
-  // before the voice does.
+  // A shade ahead of the clock: the eye reaches a line just before the voice does.
   const at = lines ? lineAt(lines, time + 0.3) : -1;
 
-  // ponytail: always follows the song; pause following while the listener scrolls
-  // if that ever annoys.
+  // Follow the song. scrollTo on the panel rather than scrollIntoView, which walks
+  // every scrollable ancestor and would drag the whole view along with the line.
+  // 0.38 keeps the current line a little above centre, so what is coming has room.
   useEffect(() => {
-    active.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [at]);
+    const el = active.current;
+    const view = box.current;
+    if (!el || !view || held) return;
+    view.scrollTo({
+      top: el.offsetTop - view.clientHeight * 0.38,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+    });
+  }, [at, held, lyrics]);
+
+  // Reading ahead has to win over following, or the panel yanks the words away
+  // mid-sentence. Wheel and touch only: the smooth scroll above raises scroll
+  // events of its own, and listening for those would have the panel mistake
+  // itself for the listener and never follow again.
+  const hold = () => {
+    setHeld(true);
+    clearTimeout(release.current);
+    release.current = setTimeout(() => setHeld(false), 4000);
+  };
+
+  const empty = !lines && !plain;
 
   return (
-    <div
-      className="min-h-0 w-full min-w-0 flex-1 overflow-y-auto overscroll-contain py-32 text-left [mask-image:linear-gradient(transparent,black_15%,black_85%,transparent)] lg:h-[70vh] lg:py-[30vh]"
-      aria-live="off"
-    >
-      {lyrics === undefined ? (
-        <p className="text-sm text-white/50">Looking for lyrics…</p>
-      ) : lyrics === null ? (
-        <p className="text-sm text-white/50">No lyrics found for this song.</p>
-      ) : lines ? (
-        <ol>
-          {lines.map((l, i) => (
-            <li key={i}>
-              <button
-                ref={i === at ? active : undefined}
-                onClick={() => onSeek(l.t)}
-                className={`block w-full rounded-lg px-2 py-1.5 text-left text-2xl font-bold tracking-tight transition-all duration-300 hover:bg-white/10 lg:text-3xl ${
-                  i === at
-                    ? "scale-100 text-white"
-                    : i < at
-                      ? "scale-95 text-white/35"
-                      : "scale-95 text-white/55"
-                } origin-left`}
-              >
-                {l.text || "♪"}
-              </button>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="whitespace-pre-line px-2 text-xl font-semibold leading-relaxed text-white/85 lg:text-2xl">
-          {plain}
-        </p>
-      )}
+    // Two elements, not one: the outer takes its height from the composition, the
+    // inner fills it absolutely and scrolls. See .stage-lyrics in globals.css.
+    <div className="stage-lyrics">
+      <div
+        ref={box}
+        className="stage-lyrics-view"
+        data-empty={empty || undefined}
+        onWheel={hold}
+        onTouchMove={hold}
+      >
+        {lyrics === undefined ? (
+          // Three bars rather than a spinner: it shows the shape of what is coming.
+          <div
+            className="flex w-56 flex-col gap-3"
+            aria-label="Looking for lyrics"
+          >
+            {[100, 72, 86].map((w, i) => (
+              <span
+                key={i}
+                className="h-4 animate-pulse rounded-full bg-white/15"
+                style={{ width: `${w}%`, animationDelay: `${i * 140}ms` }}
+              />
+            ))}
+          </div>
+        ) : empty ? (
+          <p className="max-w-56 text-center text-sm text-white/45">
+            No lyrics found for this song.
+          </p>
+        ) : lines ? (
+          <>
+            <ol>
+              {lines.map((l, i) => (
+                <li key={i}>
+                  <button
+                    ref={i === at ? active : undefined}
+                    onClick={() => onSeek(l.t)}
+                    // No data-state is the sung state; the CSS reads the absence.
+                    data-state={i === at ? "now" : i > at ? "soon" : undefined}
+                    className="lyric-line"
+                    title="Play from here"
+                  >
+                    {l.text || (
+                      <Interlude
+                        from={l.t}
+                        to={lines[i + 1]?.t ?? l.t + 5}
+                        time={time}
+                      />
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ol>
+            <Credit />
+          </>
+        ) : (
+          <>
+            <p className="mb-6 text-xxs font-semibold uppercase tracking-widest text-white/40">
+              Words only · not timed to the song
+            </p>
+            <p className="lyric-plain">{plain}</p>
+            <Credit />
+          </>
+        )}
+      </div>
     </div>
+  );
+}
+
+/** Someone transcribed and timed these by hand for nothing. Say so. */
+const Credit = () => (
+  <p className="pt-10 text-xxs text-white/30">Lyrics from LRCLIB</p>
+);
+
+/**
+ * The instrumental stretches between sung lines. Three dots filling left to right
+ * over the gap say "still playing, still in the right place" — the alternative is a
+ * blank column that reads as the panel having lost the song.
+ */
+function Interlude({
+  from,
+  to,
+  time,
+}: {
+  from: number;
+  to: number;
+  time: number;
+}) {
+  const done = Math.min(
+    Math.max((time - from) / Math.max(to - from, 0.001), 0),
+    1,
+  );
+  return (
+    <span className="flex items-center gap-2" aria-label="Instrumental">
+      {[0, 1, 2].map((i) => {
+        // Each dot owns a third of the gap and fills within it.
+        const fill = Math.min(Math.max(done * 3 - i, 0), 1);
+        return (
+          <span
+            key={i}
+            className="h-2.5 w-2.5 rounded-full bg-current transition-[opacity,scale] duration-500 ease-glide"
+            style={{
+              opacity: 0.35 + fill * 0.65,
+              scale: `${0.8 + fill * 0.3}`,
+            }}
+          />
+        );
+      })}
+    </span>
   );
 }

@@ -33,7 +33,7 @@ export const SHORTCUT_GROUPS: {
     items: [
       { keys: ["I"], label: "Full view, queue and all" },
       { keys: ["F"], label: "Full screen, queue hidden" },
-      { keys: ["Esc"], label: "Leave the full view" },
+      { keys: ["Esc"], label: "Close the lyrics, then the view" },
       { keys: ["/"], label: "Jump to search" },
       { keys: ["?"], label: "Show this list" },
     ],

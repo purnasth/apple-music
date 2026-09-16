@@ -19,7 +19,9 @@ with no database, no accounts, and no backend to run.
   your own files.
 - **Lyrics** in the full-screen view: time-synced lines from
   [LRCLIB](https://lrclib.net) that follow the song and seek on click, falling
-  back to the plain lyrics embedded in your own files.
+  back to the plain lyrics embedded in your own files. The view re-forms around
+  them — beside the cover on a desktop, with the cover shrunk to a header
+  thumbnail on a phone — and scrolling by hand pauses the follow until you stop.
 
 ## A note on catalogue playback
 

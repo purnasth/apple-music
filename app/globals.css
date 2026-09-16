@@ -34,6 +34,14 @@
   --radius-sheet: 20px;
 
   --text-xxs: 10px;
+
+  /* Two curves, because the built-in keywords are too weak to read as deliberate.
+     Glide is a strong ease-out, for anything arriving or leaving — it starts fast,
+     so it feels answered. Shift is a strong ease-in-out, for something already on
+     screen moving to a new place. Nothing here eases *in*: a slow start delays the
+     very moment the eye is on. */
+  --ease-glide: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-shift: cubic-bezier(0.77, 0, 0.175, 1);
 }
 
 html {
@@ -272,5 +280,272 @@ nav,
   }
   .range {
     --range-h: 6px;
+  }
+}
+
+/* ---------- The full player's composition ----------
+
+   Three blocks: the identity (cover, title, artist), the transport, and the
+   lyrics column when it is open. Grid areas rather than nested flexbox because
+   the three re-order between sizes — on a phone the words sit *between* identity
+   and transport, on a desktop they sit *beside* both — and a grid can say that
+   without the markup having to change shape.
+
+   The toggle animates max-width and the cover's width, which are layout
+   properties the performance rules would normally keep off the animation path.
+   It is allowed here because this fires once on a deliberate tap, not per frame
+   of a gesture, and it is only two elements deep. Anything the user can drag
+   stays on transform and opacity. */
+.stage {
+  display: grid;
+  grid-template-areas: "id" "ctl";
+  justify-items: center;
+  width: 100%;
+  max-width: 32rem;
+  margin-block: auto;
+  transition: max-width 450ms var(--ease-shift);
+}
+
+.stage[data-lyrics] {
+  grid-template-areas: "id" "lyr" "ctl";
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  row-gap: 0.5rem;
+  flex: 1;
+  min-height: 0;
+  margin-block: 0;
+}
+
+@media (width >= 64rem) {
+  .stage[data-lyrics] {
+    /* The column pair is centred as one object, so the words end where the
+       composition ends and no dead margin opens on the right. */
+    max-width: 68rem;
+    grid-template-areas: "id lyr" "ctl lyr";
+    grid-template-columns: 21rem minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-content: center;
+    column-gap: 4.5rem;
+  }
+}
+
+/* The words end level with the transport and begin level with the cover. Both
+   columns reading to the same two edges is what makes it look set rather than
+   dropped in beside. */
+.stage-lyrics {
+  grid-area: lyr;
+  justify-self: stretch;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  /* Glass arriving, not a label fading in: blur and offset resolve together so it
+     reads as a material coming into focus. */
+  animation: lyrics-in 380ms var(--ease-glide) both;
+}
+
+/* Absolutely filling its area, so a hundred lines of song cannot push the grid
+   row taller and prise the cover away from the transport beside it. The column
+   takes its height from the composition; the words scroll inside it. */
+.stage-lyrics-view {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-block: 2rem 45vh;
+  /* A scroll edge effect rather than a rule: the words thin out where they meet
+     the chrome instead of being cut by a line (HIG — Liquid Glass). */
+  mask-image: linear-gradient(transparent, #000 12%, #000 80%, transparent);
+  /* A scrollbar down the middle of the composition would be the only hard edge
+     on screen. The song does the scrolling; the reader rarely needs to. */
+  scrollbar-width: none;
+}
+
+.stage-lyrics-view::-webkit-scrollbar {
+  display: none;
+}
+
+.stage-id {
+  grid-area: id;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+.stage-ctl {
+  grid-area: ctl;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.stage-art {
+  width: min(46vh, 78vw);
+  border-radius: var(--radius-sheet);
+  transition:
+    width 450ms var(--ease-shift),
+    border-radius 450ms var(--ease-shift);
+}
+
+.stage-meta {
+  margin-top: 1.5rem;
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+
+.stage-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  /* Large type reads as too loosely set at its default tracking, and wants its
+     leading pulled in to match (HIG — typography: both are size-specific). */
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  transition: font-size 450ms var(--ease-shift);
+}
+
+/* On a phone with the words up, identity collapses to a row — a thumbnail and a
+   line of text — so the lyrics get the height. The cover never disappears: it is
+   how you know at a glance what is playing. */
+.stage[data-lyrics] .stage-id {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.875rem;
+  padding-bottom: 0.25rem;
+}
+.stage[data-lyrics] .stage-art {
+  width: 3.25rem;
+  border-radius: var(--radius-control);
+}
+.stage[data-lyrics] .stage-meta {
+  margin-top: 0;
+  flex: 1;
+  text-align: left;
+}
+.stage[data-lyrics] .stage-title {
+  font-size: 1rem;
+}
+.stage[data-lyrics] .stage-aside {
+  display: none;
+}
+
+@media (width >= 64rem) {
+  .stage[data-lyrics] .stage-id {
+    flex-direction: column;
+    gap: 0;
+    padding-bottom: 0;
+  }
+  .stage[data-lyrics] .stage-art {
+    width: 100%;
+    border-radius: var(--radius-sheet);
+  }
+  .stage[data-lyrics] .stage-meta {
+    margin-top: 1.5rem;
+    flex: none;
+    text-align: center;
+  }
+  .stage[data-lyrics] .stage-title {
+    font-size: 1.5rem;
+  }
+  .stage[data-lyrics] .stage-aside {
+    display: block;
+  }
+}
+
+/* ---------- The lyrics column ---------- */
+
+@keyframes lyrics-in {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+    translate: 0 1.5rem;
+  }
+}
+
+/* Nothing to scroll means nothing to reserve room for: a "looking…" or a "none
+   found" centres itself in the column instead of sitting at the top of an
+   otherwise empty half-screen. */
+.stage-lyrics-view[data-empty] {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding-block: 0;
+  overflow: hidden;
+  mask-image: none;
+}
+
+/* A sheet with no timings cannot follow the song, so it does not pretend to:
+   one steady weight, a looser measure, and a caption saying why. */
+.lyric-plain {
+  white-space: pre-line;
+  font-size: clamp(1.1rem, 0.7vw + 0.95rem, 1.45rem);
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: -0.015em;
+  color: rgb(255 255 255 / 0.78);
+}
+
+/* One weight for every line, always. Bolding the current line would re-wrap it
+   and shove every line below it sideways on each beat; opacity carries the whole
+   hierarchy instead, and carries it without moving anything. */
+.lyric-line {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: clamp(1.3rem, 1vw + 1.05rem, 1.9rem);
+  font-weight: 600;
+  line-height: 1.26;
+  letter-spacing: -0.02em;
+  padding-block: 0.42em;
+  color: #fff;
+  opacity: 0.3;
+  scale: 0.985;
+  transform-origin: left center;
+  transition:
+    opacity 420ms var(--ease-glide),
+    scale 420ms var(--ease-glide);
+}
+
+/* Sung, coming, and now. The step from 0.5 to 1 is what the eye locks onto. */
+.lyric-line[data-state="soon"] {
+  opacity: 0.5;
+}
+.lyric-line[data-state="now"] {
+  opacity: 1;
+  scale: 1;
+}
+
+/* Gated: a tap on a touch screen fires a phantom hover that would leave the
+   wrong line lit up. */
+@media (hover: hover) and (pointer: fine) {
+  .lyric-line:hover {
+    opacity: 0.8;
+  }
+  .lyric-line[data-state="now"]:hover {
+    opacity: 1;
+  }
+}
+
+.lyric-line:active {
+  scale: 0.975;
+  transition-duration: 120ms;
+}
+
+.lyric-line:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 4px;
+  border-radius: 6px;
+  opacity: 1;
+}
+
+/* The blanket rule near the top of this file already cuts every duration to
+   nothing under reduced motion, so the timings above take care of themselves.
+   What it cannot do is remove a resting transform: without this the unsung lines
+   would simply sit permanently scaled down. Opacity still carries the hierarchy,
+   which is the part that explains rather than moves. */
+@media (prefers-reduced-motion: reduce) {
+  .lyric-line,
+  .lyric-line:active {
+    scale: 1;
   }
 }
