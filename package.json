@@ -10,7 +10,8 @@
     "lint": "eslint",
     "test": "node --experimental-strip-types --test lib/*.test.ts",
     "songs": "node scripts/build-songs.mjs",
-    "deploy": "npm run songs && NEXT_PUBLIC_ENV=production next build && npx wrangler deploy"
+    "deploy": "npm run songs && NEXT_PUBLIC_ENV=production next build && npx wrangler deploy",
+    "words": "node --experimental-strip-types --no-warnings scripts/align-lyrics.mjs"
   },
   "dependencies": {
     "framer-motion": "^13.2.0",

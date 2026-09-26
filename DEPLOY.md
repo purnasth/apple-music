@@ -20,6 +20,10 @@ it is the only place the songs exist.
    folder appears on its own.
 2. `npm run deploy`
 
+To have the new songs' lyrics light up word by word rather than line by line,
+run `npm run words` before step 2 — see below. Skipping it is fine: those songs
+fall back to line-level timing.
+
 Tags are read from the files themselves, so nothing needs renaming. Only changed
 files upload — wrangler skips assets already on the edge by content hash.
 
@@ -33,6 +37,37 @@ literal, so the code is dropped from the bundle rather than hidden inside it.
 
 A fresh clone needs `cp .env.example .env.local` to get the import controls in
 `npm run dev`. Adding songs goes through `public/songs/` above.
+
+## Lyrics timed to the word
+
+LRCLIB times each line by hand but has no word timings for this library, and the
+services that do (Apple's own, Musixmatch behind Spotify) are not open. So the
+words are timed here, from the audio, once:
+
+```
+npm run words     # after `npm run songs`; then `npm run deploy` as usual
+```
+
+For each song with timed lines it runs whisper.cpp over the file to hear where
+each word falls, pairs what it heard with the real lyric (lib/align.ts), and
+writes `public/songs-words/`. LRCLIB's line starts stay the anchor; the model
+only places words inside a line. Songs where too little was heard keep line-level
+timing, and the log says which. Finished songs are cached, so a rerun only does
+new ones; `-- --force` redoes everything, `-- <text>` limits it to matching titles.
+
+It takes roughly half a minute a song on an M3, longer where the quick pass is
+weak and it decodes again carefully. Everything runs on this machine.
+
+One-time setup (about 500 MB):
+
+```
+brew install whisper-cpp
+mkdir -p ~/.cache/whisper
+curl -L -o ~/.cache/whisper/ggml-small-q5_1.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin
+```
+
+`WHISPER_MODEL=/path/to/model.bin` points it at a different model.
 
 ## Why deploys are manual
 
@@ -64,6 +99,7 @@ free tier. Until then the switch above is the whole answer.
 | audio | `public/songs/<folder>/` — drop files here, gitignored |
 | covers | `public/songs-art`, generated, gitignored |
 | lyrics | `public/songs-lyrics`, plain text pulled from the files, generated, gitignored |
+| word timings | `public/songs-words`, from `npm run words`, generated, gitignored |
 | manifest | `public/songs.json`, generated, gitignored |
 | in git | `scripts/build-songs.mjs`, ~4 KB |
 

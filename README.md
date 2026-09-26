@@ -19,7 +19,8 @@ with no database, no accounts, and no backend to run.
   your own files.
 - **Lyrics** in the full-screen view (button, or `Y`): time-synced lines from
   [LRCLIB](https://lrclib.net), falling back to the plain lyrics embedded in
-  your own files. The current line fills as it is sung, tapping any line seeks
+  your own files. Bundled songs can be timed to the word offline (`npm run
+  words`, see DEPLOY.md); the rest fill line by line. The current line fills as it is sung, tapping any line seeks
   there, and scrolling away offers a way back. Timing runs on one animation-frame
   clock reading the audio directly, so React re-renders only when the line
   changes. Opening and closing is a native view transition, not a layout
@@ -68,6 +69,8 @@ app/page.tsx          search, library and playlist UI
 components/Player.tsx player bar, playback and MediaSession wiring
 lib/music.ts          search, IndexedDB library, playlist persistence
 components/Lyrics.tsx lyrics panel: frame clock, sweep, follow and hold
-lib/lyrics.ts         LRC parsing, line lookup, sweep pacing, LRCLIB lookup
+lib/lyrics.ts         LRC parsing, line and word lookup, sweep pacing, LRCLIB lookup
+lib/align.ts          word timing by forced alignment, build time only
+scripts/align-lyrics.mjs  runs whisper.cpp over the library for lib/align.ts
 lib/music.test.ts     smoke tests
 ```

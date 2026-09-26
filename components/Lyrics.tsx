@@ -2,6 +2,7 @@
 
 import {
   CSSProperties,
+  Fragment,
   RefObject,
   memo,
   useCallback,
@@ -11,7 +12,14 @@ import {
 } from "react";
 import { TbCurrentLocation } from "react-icons/tb";
 import type { Track } from "@/lib/music";
-import { Line, Lyrics, getLyrics, lineAt, progress } from "@/lib/lyrics";
+import {
+  Line,
+  Lyrics,
+  getLyrics,
+  lineAt,
+  progress,
+  wordAt,
+} from "@/lib/lyrics";
 
 /** The eye reaches a line a beat before the voice does. */
 const LEAD = 0.3;
@@ -63,14 +71,22 @@ export default function LyricsPanel({
   const plain = lyrics && "plain" in lyrics ? lyrics.plain : undefined;
 
   // The clock. Idle frames cost one property read and a comparison: nothing is
-  // written while paused, or while a line holds full through a silence.
+  // written while paused, or while a word or line holds full through a silence.
+  //
+  // Two modes. A line timed to the word (lines[i].w, from the offline aligner)
+  // marks each word sung, current or coming as the voice reaches it, and fills
+  // the current word. A line timed only at its start fills as a whole, paced by
+  // a heuristic. Either way the only writes are attributes and one variable on
+  // the element concerned; React is not involved.
   useEffect(() => {
     if (!lines) return;
     let raf = 0;
     let cur = -1;
     let lastT = NaN;
     let lastP = -1;
+    let lastK = -2;
     let lit: HTMLElement | null = null;
+    let words: HTMLElement[] = [];
     const frame = () => {
       raf = requestAnimationFrame(frame);
       const t = audio.current?.currentTime;
@@ -82,10 +98,28 @@ export default function LyricsPanel({
       if (el !== lit) {
         lit?.style.removeProperty("--p");
         lit = el;
+        words = el ? [...el.querySelectorAll<HTMLElement>(".w")] : [];
         lastP = -1;
+        lastK = -2;
+      }
+      if (!el) return;
+      const line = lines[cur];
+      if (line?.w && words.length === line.w.length) {
+        const { k, p } = wordAt(line, t);
+        if (k !== lastK) {
+          words.forEach(
+            (w, j) => (w.dataset.w = j < k ? "sung" : j === k ? "now" : ""),
+          );
+          lastK = k;
+          lastP = -1;
+        }
+        const q = Math.round(p * 1000) / 1000;
+        if (k >= 0 && q !== lastP)
+          words[k].style.setProperty("--p", String((lastP = q)));
+        return;
       }
       const p = Math.round(progress(lines, cur, t) * 1000) / 1000;
-      if (el && p !== lastP) el.style.setProperty("--p", String((lastP = p)));
+      if (p !== lastP) el.style.setProperty("--p", String((lastP = p)));
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
@@ -232,10 +266,19 @@ const Lines = memo(function Lines({
               className="lyric-line"
               title="Play from here"
             >
-              {l.text ? (
-                <span className="lyric-text">{l.text}</span>
-              ) : (
+              {!l.text ? (
                 <Interlude />
+              ) : l.w ? (
+                // One span per word, split exactly as the aligner split them,
+                // with the spaces left as plain text so the line wraps as prose.
+                l.text.split(" ").map((w, k) => (
+                  <Fragment key={k}>
+                    {k > 0 && " "}
+                    <span className="w">{w}</span>
+                  </Fragment>
+                ))
+              ) : (
+                <span className="lyric-text">{l.text}</span>
               )}
             </button>
           </li>

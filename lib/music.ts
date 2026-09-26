@@ -16,6 +16,8 @@ export type Track = {
   folder?: string;
   /** Plain lyrics the file carried, written out by the indexer; fetched when the panel opens. */
   lyrics?: string;
+  /** Lyrics timed to the word by scripts/align-lyrics.mjs, when that has run. */
+  words?: string;
 };
 
 /* ---------- Deezer search (public API, no key) ----------

@@ -32,6 +32,7 @@ self.addEventListener('fetch', (e) => {
   if (
     url.pathname.startsWith('/songs-art/') ||
     url.pathname.startsWith('/songs-lyrics/') ||
+    url.pathname.startsWith('/songs-words/') ||
     (url.pathname.startsWith('/_next/static/') && location.hostname !== 'localhost')
   )
     return e.respondWith(cacheFirst(e.request));

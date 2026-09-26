@@ -579,6 +579,38 @@ nav,
   -webkit-text-fill-color: transparent;
 }
 
+/* Timed to the word. Each word is its own box, so the current one can fill and
+   lift without moving its neighbours: inline-block keeps the line wrapping as
+   prose (the spaces between are plain text), and the lift is a transform, so
+   nothing reflows. Sung words are lit, coming words wait at 40%, and the
+   current word fills from --p exactly as the line sweep does — only now the
+   pace is the singer's, measured, not guessed. The lift is 0.05em, about a
+   pixel and a half: enough to feel the word land, not enough to watch. */
+.lyric-line .w {
+  display: inline-block;
+  transition:
+    color 180ms var(--ease-glide),
+    translate 260ms var(--ease-glide);
+}
+.lyric-line[data-state="now"] .w {
+  color: rgb(255 255 255 / 0.4);
+}
+.lyric-line[data-state="now"] .w[data-w="sung"] {
+  color: #fff;
+  translate: 0 -0.05em;
+}
+.lyric-line[data-state="now"] .w[data-w="now"] {
+  translate: 0 -0.05em;
+  background-image: linear-gradient(
+    90deg,
+    #fff calc(var(--p, 0) * (100% + 0.6em) - 0.6em),
+    rgb(255 255 255 / 0.4) calc(var(--p, 0) * (100% + 0.6em))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 /* Three dots over an instrumental. Each owns a third of the gap and fills
    from the same --p; while current, the trio breathes on a slow cycle. */
 .interlude {
@@ -641,5 +673,8 @@ nav,
      frame rate — stop it outright instead. */
   .lyric-line[data-state="now"] .interlude {
     animation: none;
+  }
+  .lyric-line .w {
+    translate: none !important;
   }
 }

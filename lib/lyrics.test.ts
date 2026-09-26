@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseLrc, lineAt, progress } from "./lyrics.ts";
+import { parseLrc, lineAt, progress, wordAt } from "./lyrics.ts";
 
 test("parseLrc reads stamps, expands repeated ones, sorts, skips junk", () => {
   const lines = parseLrc(
@@ -42,4 +42,18 @@ test("progress paces sung lines and spans instrumental gaps", () => {
     while (lin + 1 < lines.length && lines[lin + 1].t <= t) lin++;
     assert.equal(lineAt(lines, t), lin);
   }
+});
+
+test("wordAt finds the sung word and its fill", () => {
+  const line = { t: 10, text: "so long goodbye", w: [10, 10.5, 12], e: 13 };
+  assert.deepEqual(wordAt(line, 9.9), { k: -1, p: 0 });
+  const a = wordAt(line, 10.16); // 2 chars -> 0.32s
+  assert.equal(a.k, 0);
+  assert.ok(Math.abs(a.p - 0.5) < 1e-9);
+  assert.equal(wordAt(line, 11.9).k, 1);
+  assert.equal(wordAt(line, 11.9).p, 1); // "long" filled at singing pace, then held
+  const b = wordAt(line, 12.5); // capped by the line end at 13
+  assert.equal(b.k, 2);
+  assert.ok(Math.abs(b.p - 0.5) < 1e-9);
+  assert.deepEqual(wordAt({ t: 0, text: "x" }, 5), { k: -1, p: 0 });
 });

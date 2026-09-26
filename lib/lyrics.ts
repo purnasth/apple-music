@@ -1,6 +1,13 @@
 import type { Track } from "./music";
 
-export type Line = { t: number; text: string };
+export type Line = {
+  t: number;
+  text: string;
+  /** Start of each space-separated word, seconds — present once aligned to the word. */
+  w?: number[];
+  /** When singing on this line stops; the last word's end. */
+  e?: number;
+};
 
 /** "[mm:ss.xx] words" per line; a line may carry several stamps (a repeated chorus).
     Enhanced-LRC word stamps ("<mm:ss.xx>word") are stripped rather than shown raw. */
@@ -54,6 +61,26 @@ export function progress(lines: Line[], i: number, time: number): number {
   return Math.min(Math.max((time - line.t) / Math.max(span, 0.001), 0), 1);
 }
 
+/**
+ * For a line timed to the word: which word is being sung (-1 before the first)
+ * and how far through it, 0 to 1. A word fills over the time to the next word,
+ * but no slower than a held syllable would, so a pause after a word does not
+ * read as the word being stretched across it.
+ */
+export function wordAt(line: Line, time: number): { k: number; p: number } {
+  const w = line.w;
+  if (!w?.length || time < w[0]) return { k: -1, p: 0 };
+  let k = 0;
+  while (k + 1 < w.length && w[k + 1] <= time) k++;
+  const next = w[k + 1] ?? line.e ?? w[k] + 1;
+  const len = line.text.split(" ")[k]?.length ?? 1;
+  const span = Math.min(next - w[k], Math.max(0.3, len * 0.16));
+  return {
+    k,
+    p: Math.min(Math.max((time - w[k]) / Math.max(span, 0.001), 0), 1),
+  };
+}
+
 export type Lyrics = { lines: Line[] } | { plain: string };
 
 type LrcRecord = {
@@ -85,7 +112,12 @@ async function lrclib(path: string, params: Record<string, string>) {
   return res.ok ? ((await res.json()) as LrcRecord | LrcRecord[]) : null;
 }
 
-async function fetchLyrics(track: Track): Promise<Lyrics | null> {
+/** LRCLIB's best timed text for a track, plus the plain text of its exact match.
+    Shared with scripts/align-lyrics.mjs, so the words the aligner times are the
+    words the browser would have shown. */
+export async function findLrc(
+  track: Pick<Track, "title" | "artist" | "album" | "duration">,
+): Promise<{ synced: string | null; plain: string | null }> {
   const dur = track.duration ?? 0;
   const exact = (await lrclib("get", {
     artist_name: track.artist,
@@ -109,11 +141,29 @@ async function fetchLyrics(track: Track): Promise<Lyrics | null> {
           r.syncedLyrics && (!dur || Math.abs((r.duration ?? 0) - dur) < 5),
       ) ?? null;
   }
-  if (hit?.syncedLyrics) return { lines: parseLrc(hit.syncedLyrics) };
+  return {
+    synced: hit?.syncedLyrics ?? null,
+    plain: exact?.plainLyrics ?? null,
+  };
+}
+
+async function fetchLyrics(track: Track): Promise<Lyrics | null> {
+  // Timed to the word offline by scripts/align-lyrics.mjs: the most exact
+  // source there is, a static file beside the song, and no LRCLIB round trip.
+  if (track.words) {
+    const res = await fetch(track.words).catch(() => null);
+    const data = res?.ok
+      ? ((await res.json()) as { lines?: Line[] | null })
+      : null;
+    if (data?.lines?.length) return { lines: data.lines };
+  }
+
+  const { synced, plain } = await findLrc(track);
+  if (synced) return { lines: parseLrc(synced) };
 
   if (track.lyrics) {
     const res = await fetch(track.lyrics);
     if (res.ok) return { plain: await res.text() };
   }
-  return exact?.plainLyrics ? { plain: exact.plainLyrics } : null;
+  return plain ? { plain } : null;
 }

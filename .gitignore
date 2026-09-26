@@ -47,4 +47,5 @@ next-env.d.ts
 /public/songs/
 /public/songs-art/
 /public/songs-lyrics/
+/public/songs-words/
 /public/songs.json
