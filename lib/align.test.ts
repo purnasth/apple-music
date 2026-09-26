@@ -6,6 +6,7 @@ import {
   languageOf,
   similarity,
   skeleton,
+  timeLines,
 } from "./align.ts";
 
 test("similarity crosses scripts and spellings", () => {
@@ -62,6 +63,47 @@ test("align corrects the model clock and places words inside their lines", () =>
     "unheard word is interpolated after its neighbour",
   );
   assert.ok(r.matched > 0.8);
+});
+
+test("timeLines times plain lyrics from where each line was heard", () => {
+  const texts = [
+    "hold me close",
+    "never let go",
+    "somewhere far away",
+    "hold me close",
+  ];
+  // "never let go" is not heard; the chorus repeats; "hold" is missed once.
+  const heard = [
+    { text: "hold", t: 12 },
+    { text: "me", t: 12.4 },
+    { text: "close", t: 12.9 },
+    { text: "somewhere", t: 20 },
+    { text: "far", t: 20.6 },
+    { text: "away", t: 21 },
+    { text: "me", t: 30.3 },
+    { text: "close", t: 30.8 },
+  ];
+  const lines = timeLines(texts, heard);
+  assert.deepEqual(
+    lines.map((l) => l.text),
+    texts,
+  );
+  assert.equal(lines[0].t, 12);
+  assert.equal(lines[2].t, 20);
+  assert.ok(lines[1].t > 12 && lines[1].t < 20, "unheard line sits between");
+  assert.equal(lines[3].t, 30, "a missed first word backs off by its lead");
+  assert.equal(align(lines, heard).matched, 8 / 12);
+  // A line heard sooner than the one before it could be sung is treated as unheard.
+  const rushed = timeLines(["about you", "about you", "do you forget"], [
+    { text: "about", t: 50 },
+    { text: "about", t: 50.2 },
+    { text: "do", t: 50.4 },
+  ]);
+  assert.deepEqual(
+    rushed.map((l) => l.t),
+    [50, 52.5, 55],
+  );
+  assert.deepEqual(timeLines(texts, []), []);
 });
 
 test("languageOf reads the lyric, not the intro", () => {

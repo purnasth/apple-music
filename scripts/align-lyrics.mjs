@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
-import { align, heardWords, languageOf } from '../lib/align.ts';
+import { align, heardWords, languageOf, timeLines } from '../lib/align.ts';
 import { findLrc, parseLrc } from '../lib/lyrics.ts';
 import { WORDS, attachWords, wordsFile } from './words-key.mjs';
 
@@ -41,6 +41,10 @@ const tracks = JSON.parse(await readFile('public/songs.json', 'utf8')).filter(
   (t) => !filter || `${t.title} ${t.artist}`.toLowerCase().includes(filter),
 );
 
+/** Sung lines of a plain lyric sheet, without blanks or section tags like [Chorus]. */
+const sheetLines = (text) =>
+  text.split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter((l) => l && !/^\[.*\]$/.test(l));
+
 const tmp = join(tmpdir(), `align-${process.pid}`);
 await mkdir(tmp, { recursive: true });
 const tally = { timed: 0, weak: 0, noLyrics: 0, cached: 0, failed: 0 };
@@ -48,23 +52,27 @@ const tally = { timed: 0, weak: 0, noLyrics: 0, cached: 0, failed: 0 };
 for (const [n, t] of tracks.entries()) {
   const out = join(OUT, wordsFile(t.preview));
   const label = `[${n + 1}/${tracks.length}] ${t.artist} — ${t.title}`;
-  if (!force && (await access(out).then(() => true, () => false))) {
+  const prior = force ? null : await readFile(out, 'utf8').then(JSON.parse, () => null);
+  // Written before untimed lyrics could be timed from the audio.
+  if (prior && prior.why !== 'no synced lyrics') {
     tally.cached++;
     continue;
   }
   try {
-    const { synced } = await findLrc(t);
-    if (!synced) {
+    const { synced, plain } = await findLrc(t);
+    const sheet = t.lyrics ? await readFile(`public${t.lyrics}`, 'utf8').catch(() => null) : null;
+    const texts = synced ? null : sheetLines(sheet ?? plain ?? '');
+    if (!synced && !texts.length) {
       // Cached too, so the next run does not ask again.
-      await save(out, { lines: null, why: 'no synced lyrics' });
+      await save(out, { lines: null, why: 'no lyrics' });
       tally.noLyrics++;
-      console.log(`${label}: no synced lyrics`);
+      console.log(`${label}: no lyrics`);
       continue;
     }
-    const lines = parseLrc(synced);
-    const lang = languageOf(lines);
-    // Skip the intro; timestamps stay absolute.
-    const from = Math.max(0, Math.floor(((lines.find((l) => l.text)?.t ?? 0) - 1) * 1000));
+    const lines = synced ? parseLrc(synced) : null;
+    const lang = languageOf(lines ?? texts.map((text) => ({ text })));
+    // Skip the intro; timestamps stay absolute. Untimed lyrics are heard from the start.
+    const from = lines ? Math.max(0, Math.floor(((lines.find((l) => l.text)?.t ?? 0) - 1) * 1000)) : 0;
     const src = `public/songs/${decodeURIComponent(t.preview.replace(/^\/songs\//, '').replace(/\?.*$/, ''))}`;
     const wav = join(tmp, 'a.wav');
     await run('afconvert', ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', src, wav]);
@@ -73,7 +81,8 @@ for (const [n, t] of tracks.entries()) {
       await run('whisper-cli', ['-m', MODEL, '-f', wav, '-l', language, '-ot', String(from), '-ojf',
         '-of', join(tmp, 'a'), '--dtw', 'small', '-nfa', '-np', '-mc', '0', ...extra],
         { maxBuffer: 64 << 20 });
-      return align(lines, heardWords(JSON.parse(await readFile(join(tmp, 'a.json'), 'utf8'))));
+      const heard = heardWords(JSON.parse(await readFile(join(tmp, 'a.json'), 'utf8')));
+      return align(lines ?? timeLines(texts, heard), heard);
     };
     // -nf (no temperature fallback) is ~5x faster; only weak results get the full decode.
     let r = await hear(['-nf']);
@@ -83,7 +92,7 @@ for (const [n, t] of tracks.entries()) {
       if (full.matched > r.matched) r = full;
     }
     // Latin script may be English or romanised Hindi/Nepali: try the other.
-    if (r.matched < GOOD_ENOUGH && (lang === 'en' || lang === 'hi') && !/[\u0900-\u097F]/.test(synced)) {
+    if (r.matched < GOOD_ENOUGH && (lang === 'en' || lang === 'hi') && !/[\u0900-\u097F]/.test(synced ?? texts.join(' '))) {
       const other = lang === 'en' ? 'hi' : 'en';
       const alt = await hear(['-nf'], other);
       if (alt.matched > r.matched) {
@@ -97,7 +106,8 @@ for (const [n, t] of tracks.entries()) {
       : { lines: null, why: 'too little heard', matched: +r.matched.toFixed(2) });
     if (good) tally.timed++;
     else tally.weak++;
-    console.log(`${label}: ${Math.round(r.matched * 100)}% heard (${used})${good ? '' : ' — kept line-level'}`);
+    const kind = lines ? '' : ', lines timed from the audio';
+    console.log(`${label}: ${Math.round(r.matched * 100)}% heard (${used}${kind})${good ? '' : ' — kept line-level'}`);
   } catch (e) {
     tally.failed++;
     console.warn(`${label}: failed — ${String(e.message ?? e).split('\n')[0]}`);
@@ -106,7 +116,7 @@ for (const [n, t] of tracks.entries()) {
 
 await rm(tmp, { recursive: true, force: true });
 console.log(`\n${tally.timed} timed to the word, ${tally.weak} kept line-level, ` +
-  `${tally.noLyrics} without synced lyrics, ${tally.cached} already done, ${tally.failed} failed.`);
+  `${tally.noLyrics} without lyrics, ${tally.cached} already done, ${tally.failed} failed.`);
 
 const all = JSON.parse(await readFile('public/songs.json', 'utf8'));
 const worded = await attachWords(all);

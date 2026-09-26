@@ -174,6 +174,12 @@ export async function getLibrary(): Promise<Track[]> {
   return all.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 }
 
+/** Stored copies swapped for the library's own: a deploy can add timings or new art. */
+export function current(tracks: Track[], library: Track[]): Track[] {
+  const byId = new Map(library.map((t) => [t.id, t]));
+  return tracks.map((t) => byId.get(t.id) ?? t);
+}
+
 export async function removeTrack(id: string) {
   await del(id, blobs());
   await del(id, meta());

@@ -80,6 +80,12 @@ each word falls, pairs what it heard with the real lyric (`lib/align.ts`), write
 starts stay the anchor; the model only places words inside a line. Songs where
 too little was heard keep line-level timing, and the log says which.
 
+A song with only plain lyrics (the sheet in its file, else LRCLIB's plain text),
+such as a live recording nobody has timed, is heard from the start instead: each
+line starts where its first word was heard, unheard lines are spaced between their
+neighbours, and the words are then placed as above. The log marks these "lines
+timed from the audio".
+
 ```
 pnpm words               # every song not done yet
 pnpm words kasoor        # only titles/artists containing "kasoor"
@@ -92,10 +98,11 @@ decodes again carefully. The first full run over ~250 songs took over an hour.
 ### What gets cached, and when to redo it
 
 - A song is done once its file exists in `public/songs-words/` — timed, kept
-  line-level, or "no synced lyrics". None of these are retried on their own.
+  line-level, or "no lyrics". None of these are retried on their own. Files from
+  before plain lyrics could be timed ("no synced lyrics") are retried once.
 - Replacing a song's audio re-times it: the key includes the file size.
-- A song that had no synced lyrics on LRCLIB is not asked again. If LRCLIB gains
-  them later, `pnpm words --force <title>` picks them up.
+- A song timed from plain lyrics keeps that timing even if LRCLIB later gains
+  timed lines; `pnpm words --force <title>` switches it to them.
 - Deleting a song deletes its timings on the next `pnpm songs` or `pnpm words`.
 
 ### How it fits the deployment

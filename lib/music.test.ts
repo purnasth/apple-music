@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   search,
+  current,
   fmtTime,
   fmtTotal,
   folderOf,
@@ -164,4 +165,11 @@ test('search finds streaming-only releases iTunes is missing', async () => {
 
 test('search returns nothing for a blank term without calling the API', async () => {
   assert.deepEqual(await search('   '), []);
+});
+
+test('current swaps stored copies for the library\'s, keeping unknown tracks', () => {
+  const stale = { id: 'file:a.m4a', title: 'A', artist: 'X', preview: '/a' };
+  const fresh = { ...stale, words: '/songs-words/a.json?v=1' };
+  const gone = { id: 'file:gone.m4a', title: 'G', artist: 'X', preview: '/g' };
+  assert.deepEqual(current([stale, gone], [fresh]), [fresh, gone]);
 });

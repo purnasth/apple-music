@@ -20,7 +20,7 @@ with no database, no accounts, and no backend to run.
 - **Lyrics** in the full-screen view (button, or `Y`): time-synced lines from
   [LRCLIB](https://lrclib.net), falling back to the plain lyrics embedded in
   your own files. Bundled songs can be timed to the word offline (`pnpm
-  words`, run by the deploy; see DEPLOY.md); the rest fill line by line. The current line fills as it is sung, tapping any line seeks
+  words`, run by the deploy; see DEPLOY.md), including ones with only plain lyrics; the rest fill line by line. The current line fills as it is sung, tapping any line seeks
   there, and scrolling away offers a way back. Timing runs on one animation-frame
   clock reading the audio directly, so React re-renders only when the line
   changes. Opening and closing is a native view transition, not a layout
