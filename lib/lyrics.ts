@@ -53,13 +53,18 @@ export function progress(lines: Line[], i: number, time: number): number {
 }
 
 /** The word being sung (-1 before the first) and progress 0–1 through it. */
+const wordLengths = new WeakMap<Line, number[]>();
+
 export function wordAt(line: Line, time: number): { k: number; p: number } {
   const w = line.w;
   if (!w?.length || time < w[0]) return { k: -1, p: 0 };
   let k = 0;
   while (k + 1 < w.length && w[k + 1] <= time) k++;
   const next = w[k + 1] ?? line.e ?? w[k] + 1;
-  const len = line.text.split(" ")[k]?.length ?? 1;
+  let lens = wordLengths.get(line);
+  if (!lens)
+    wordLengths.set(line, (lens = line.text.split(" ").map((x) => x.length)));
+  const len = lens[k] ?? 1;
   const span = Math.min(next - w[k], Math.max(0.3, len * 0.16));
   return {
     k,
@@ -135,12 +140,16 @@ async function fetchLyrics(track: Track): Promise<Lyrics | null> {
     if (data?.lines?.length) return { lines: data.lines };
   }
 
-  const { synced, plain } = await findLrc(track);
-  if (synced) return { lines: parseLrc(synced) };
+  // Offline, LRCLIB throws; the bundled sheet is still worth showing.
+  const found = await findLrc(track).catch((e) => {
+    if (!track.lyrics) throw e;
+    return null;
+  });
+  if (found?.synced) return { lines: parseLrc(found.synced) };
 
   if (track.lyrics) {
     const res = await fetch(track.lyrics);
     if (res.ok) return { plain: await res.text() };
   }
-  return plain ? { plain } : null;
+  return found?.plain ? { plain: found.plain } : null;
 }

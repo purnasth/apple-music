@@ -15,10 +15,16 @@ export async function attachWords(tracks) {
   let n = 0;
   for (const t of tracks) {
     const name = wordsFile(t.preview);
-    wanted.add(name);
     delete t.words;
     const raw = await readFile(join(WORDS, name), 'utf8').catch(() => null);
-    if (!raw || !JSON.parse(raw).lines) continue;
+    let data = null;
+    try {
+      data = raw && JSON.parse(raw);
+    } catch {
+      continue; // Unreadable: not kept, so it is pruned and redone.
+    }
+    wanted.add(name);
+    if (!data?.lines) continue;
     t.words = `/songs-words/${name}?v=${createHash('sha1').update(raw).digest('hex').slice(0, 8)}`;
     n++;
   }

@@ -1,6 +1,6 @@
 // Times bundled lyrics to the word; see DEPLOY.md.
 //   pnpm words [title filter] [--force] [--if-available]
-import { readFile, writeFile, mkdir, rm, access } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, access, rename } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tmpdir, homedir } from 'node:os';
@@ -10,6 +10,11 @@ import { findLrc, parseLrc } from '../lib/lyrics.ts';
 import { WORDS, attachWords, wordsFile } from './words-key.mjs';
 
 const run = promisify(execFile);
+// Atomic: an interrupted run must not leave a half-written file behind.
+const save = async (file, data) => {
+  await writeFile(`${file}.tmp`, JSON.stringify(data));
+  await rename(`${file}.tmp`, file);
+};
 const OUT = WORDS;
 const MODEL = process.env.WHISPER_MODEL ?? join(homedir(), '.cache/whisper/ggml-small-q5_1.bin');
 const MIN_MATCH = 0.35;
@@ -51,7 +56,7 @@ for (const [n, t] of tracks.entries()) {
     const { synced } = await findLrc(t);
     if (!synced) {
       // Cached too, so the next run does not ask again.
-      await writeFile(out, JSON.stringify({ lines: null, why: 'no synced lyrics' }));
+      await save(out, { lines: null, why: 'no synced lyrics' });
       tally.noLyrics++;
       console.log(`${label}: no synced lyrics`);
       continue;
@@ -87,9 +92,9 @@ for (const [n, t] of tracks.entries()) {
       }
     }
     const good = r.matched >= MIN_MATCH;
-    await writeFile(out, JSON.stringify(good
+    await save(out, good
       ? { lines: r.lines, matched: +r.matched.toFixed(2) }
-      : { lines: null, why: 'too little heard', matched: +r.matched.toFixed(2) }));
+      : { lines: null, why: 'too little heard', matched: +r.matched.toFixed(2) });
     if (good) tally.timed++;
     else tally.weak++;
     console.log(`${label}: ${Math.round(r.matched * 100)}% heard (${used})${good ? '' : ' — kept line-level'}`);

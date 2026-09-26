@@ -331,13 +331,16 @@ export default function Player({
 
       switch (e.code) {
         case "Escape":
-          if (lyricsOn) return setShowLyrics(false);
+          if (full && lyricsOn) return setShowLyrics(false);
           return setFull(false);
         case "KeyY":
           e.preventDefault();
           if (lyricsless)
             return void toast("No lyrics for this song", { id: "lyrics" });
-          if (!full) openFull(false);
+          if (!full) {
+            openFull(false);
+            return setShowLyrics(true);
+          }
           return setShowLyrics(!lyricsOn);
         case "Space":
         case "KeyK":
