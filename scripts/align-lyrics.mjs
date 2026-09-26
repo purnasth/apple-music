@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { align, heardWords, languageOf, timeLines } from '../lib/align.ts';
-import { findLrc, parseLrc } from '../lib/lyrics.ts';
+import { findLrc, parseLrc, readable } from '../lib/lyrics.ts';
 import { WORDS, attachWords, wordsFile } from './words-key.mjs';
 
 const run = promisify(execFile);
@@ -61,7 +61,7 @@ for (const [n, t] of tracks.entries()) {
   try {
     const { synced, plain } = await findLrc(t);
     const sheet = t.lyrics ? await readFile(`public${t.lyrics}`, 'utf8').catch(() => null) : null;
-    const texts = synced ? null : sheetLines(sheet ?? plain ?? '');
+    const texts = synced ? null : sheetLines(readable(sheet, plain) ?? '');
     if (!synced && !texts.length) {
       // Cached too, so the next run does not ask again.
       await save(out, { lines: null, why: 'no lyrics' });
