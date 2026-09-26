@@ -80,6 +80,19 @@ each word falls, pairs what it heard with the real lyric (`lib/align.ts`), write
 starts stay the anchor; the model only places words inside a line. Songs where
 too little was heard keep line-level timing, and the log says which.
 
+A song with only plain lyrics (the sheet in its file, else LRCLIB's plain text),
+such as a live recording nobody has timed, is heard from the start instead: each
+line starts where its first word was heard, unheard lines are spaced between their
+neighbours, and the words are then placed as above. The log marks these "lines
+timed from the audio".
+
+Lyrics are kept in a script listeners here read. Of LRCLIB's matches, the first
+not in Urdu script wins, and readable plain text beats Urdu-only timing. When only
+Urdu exists, it is converted to Devanagari (`devanagari` in `lib/lyrics.ts`),
+which now and then guesses a short vowel wrong. Timings made from Urdu text are
+converted as the site reads them; `pnpm words --force <title>` redoes one from a
+readable version if LRCLIB has one.
+
 ```
 pnpm words               # every song not done yet
 pnpm words kasoor        # only titles/artists containing "kasoor"
@@ -92,10 +105,11 @@ decodes again carefully. The first full run over ~250 songs took over an hour.
 ### What gets cached, and when to redo it
 
 - A song is done once its file exists in `public/songs-words/` — timed, kept
-  line-level, or "no synced lyrics". None of these are retried on their own.
+  line-level, or "no lyrics". None of these are retried on their own. Files from
+  before plain lyrics could be timed ("no synced lyrics") are retried once.
 - Replacing a song's audio re-times it: the key includes the file size.
-- A song that had no synced lyrics on LRCLIB is not asked again. If LRCLIB gains
-  them later, `pnpm words --force <title>` picks them up.
+- A song timed from plain lyrics keeps that timing even if LRCLIB later gains
+  timed lines; `pnpm words --force <title>` switches it to them.
 - Deleting a song deletes its timings on the next `pnpm songs` or `pnpm words`.
 
 ### How it fits the deployment

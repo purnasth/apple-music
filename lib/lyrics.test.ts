@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseLrc, lineAt, progress, wordAt } from "./lyrics.ts";
+import { parseLrc, lineAt, progress, wordAt, readable, devanagari } from "./lyrics.ts";
 
 test("parseLrc reads stamps, expands repeated ones, sorts, skips junk", () => {
   const lines = parseLrc(
@@ -56,4 +56,26 @@ test("wordAt finds the sung word and its fill", () => {
   assert.equal(b.k, 2);
   assert.ok(Math.abs(b.p - 0.5) < 1e-9);
   assert.deepEqual(wordAt({ t: 0, text: "x" }, 5), { k: -1, p: 0 });
+});
+
+test("readable prefers any script over Urdu, and falls back to Urdu in Devanagari", () => {
+  const urdu = "چل دیے تم کہاں";
+  assert.equal(readable(urdu, "Chal diye tum kahan"), "Chal diye tum kahan");
+  assert.equal(readable(null, urdu, "तुम कहाँ"), "तुम कहाँ");
+  assert.equal(readable(null, urdu), "चल दिए तुम कहाँ");
+  assert.equal(readable(null, undefined), null);
+});
+
+test("devanagari converts Urdu and leaves LRC stamps alone", () => {
+  assert.equal(
+    devanagari("[00:12.34] پتا نہیں چلا، ہم بدل گئے"),
+    "[00:12.34] पता नहीं चला, हम बदल गए",
+  );
+  assert.equal(devanagari("یہ باتیں اور راتیں؟"), "ये बातें और रातें?");
+  assert.equal(devanagari("کیا پیار"), "क्या प्यार", "a medial ye before a vowel joins");
+  assert.equal(devanagari("دکھ بہہ"), "दख बह", "aspirates join; a doubled he is one");
+  assert.equal(devanagari("Latin stays"), "Latin stays");
+  // Timings are per word, so conversion must never split or join words.
+  const line = "دلِ بے‌چین، تیرے لیے؟ ہم";
+  assert.equal(devanagari(line).split(" ").length, line.split(" ").length);
 });

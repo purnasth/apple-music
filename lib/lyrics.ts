@@ -100,7 +100,124 @@ async function lrclib(path: string, params: Record<string, string>) {
   return res.ok ? ((await res.json()) as LrcRecord | LrcRecord[]) : null;
 }
 
-/** LRCLIB's best synced lyrics for a track, and the exact match's plain text. */
+const URDU = /[\u0600-\u06FF]/;
+
+const CONSONANT: Record<string, string> = {
+  ب: "ब", پ: "प", ت: "त", ٹ: "ट", ث: "स", ج: "ज", چ: "च", ح: "ह", خ: "ख़",
+  د: "द", ڈ: "ड", ذ: "ज़", ر: "र", ڑ: "ड़", ز: "ज़", ژ: "झ़", س: "स", ش: "श",
+  ص: "स", ض: "ज़", ط: "त", ظ: "ज़", غ: "ग़", ف: "फ़", ق: "क़", ک: "क", ك: "क",
+  گ: "ग", ل: "ल", م: "म", ن: "न", ہ: "ह", ه: "ह", ۃ: "ह",
+};
+const ASPIRATED: Record<string, string> = {
+  ب: "भ", پ: "फ", ت: "थ", ٹ: "ठ", ج: "झ", چ: "छ", د: "ध", ڈ: "ढ", ک: "ख",
+  گ: "घ", ڑ: "ढ़", ر: "र्ह", ل: "ल्ह", م: "म्ह", ن: "न्ह",
+};
+const MARK: Record<string, string> = { "ِ": "ि", "ُ": "ु", "ْ": "्", "ٰ": "ा", "ً": "न" };
+const PUNCT: Record<string, string> = { "،": ",", "؟": "?", "۔": ".", "؛": ";" };
+/** Common words whose short vowels letters alone cannot recover. */
+const WORD: Record<string, string> = {
+  میں: "में", ہیں: "हैं", ہے: "है", ہوں: "हूँ", نہیں: "नहीं", نہ: "ना", کیوں: "क्यों",
+  تم: "तुम", تو: "तो", وہ: "वो", یہ: "ये", کہ: "कि", اس: "इस", ان: "उन", اسے: "उसे",
+  انہیں: "उन्हें", تمہیں: "तुम्हें", مجھے: "मुझे", تجھے: "तुझे", مجھ: "मुझ", تجھ: "तुझ",
+  دل: "दिल", کچھ: "कुछ", پھر: "फिर", عشق: "इश्क़", کسی: "किसी", کس: "किस", جیسے: "जैसे",
+  کیسا: "कैसा", کیسے: "कैसे", ایسے: "ऐसे", ایسا: "ऐसा", کبھی: "कभी", ابھی: "अभी",
+  سبھی: "सभी", دن: "दिन", بن: "बिन", بنا: "बिना", درد: "दर्द", ستم: "सितम",
+  زندگی: "ज़िंदगी", محبت: "मोहब्बत", خدا: "ख़ुदा", دیدار: "दीदार", ساتھ: "साथ",
+  پیار: "प्यार", یار: "यार", آنسو: "आँसू", چین: "चैन", بےچین: "बेचैन", نین: "नैन",
+  رہ: "रह", کہیں: "कहीं", یہاں: "यहाँ", وہاں: "वहाँ", کہاں: "कहाँ", جہاں: "जहाँ",
+  اپنا: "अपना", اپنی: "अपनी", اپنے: "अपने", اور: "और", ہر: "हर", بار: "बार", لیے: "लिए", دیے: "दिए",
+};
+
+/**
+ * Urdu script to Devanagari: common words from a table, the rest letter by letter.
+ * Urdu seldom writes short vowels, so some words come out slightly off; it is the
+ * fallback when no readable version exists. Anything else (LRC stamps, Latin) passes through.
+ */
+export function devanagari(text: string): string {
+  return text
+    .replace(/[،؛؟۔]/g, (c) => PUNCT[c])
+    .replace(/[\u0600-\u06FF]+/g, (w) => WORD[w] ?? letters(w));
+}
+
+function letters(w: string): string {
+  let out = "";
+  let cons = false;
+  let last = "";
+  for (let i = 0; i < w.length; i++) {
+    const c = w[i];
+    const next = w[i + 1];
+    const end = i === w.length - 1 || (next === "ں" && i === w.length - 2);
+    if (next === "ھ" && ASPIRATED[c]) {
+      out += last = ASPIRATED[c];
+      i++;
+      cons = true;
+    } else if ((c === "ہ" || c === "ه") && w[i - 1] === c) {
+      continue;
+    } else if (CONSONANT[c]) {
+      out += last = CONSONANT[c];
+      cons = true;
+    } else if (c === "ّ" && cons) {
+      out += "्" + last;
+    } else if (MARK[c]) {
+      // A closing zer is the ezafe: dil-e, jaan-e.
+      out += !cons ? "" : c === "ِ" && end ? "े" : MARK[c];
+      cons = c === "ً";
+    } else if (c === "ا" || c === "آ") {
+      if (i === 0 && c === "ا") {
+        const v = ({ ی: "ए", ے: "ए", و: "ओ", "ِ": "इ", "ُ": "उ" } as Record<string, string>)[next];
+        out += v ?? "अ";
+        if (v) i++;
+      } else out += cons ? "ा" : "आ";
+      cons = false;
+    } else if (c === "و") {
+      if (i === 0 || !cons || next === "ا") {
+        out += last = "व";
+        cons = true;
+      } else {
+        out += "ो";
+        cons = false;
+      }
+    } else if (c === "ی" || c === "ي") {
+      if (i === 0 || !cons) {
+        out += last = "य";
+        cons = true;
+      } else if (next === "ا" || next === "و") {
+        out += "्य";
+        last = "य";
+      } else {
+        out += end && next !== "ں" ? "ी" : "े";
+        cons = false;
+      }
+    } else if (c === "ے") {
+      out += cons ? "े" : "ए";
+      cons = false;
+    } else if (c === "ئ") {
+      out += next === "ی" ? "ई" : next === "ے" ? "ए" : "इ";
+      if (next === "ی" || next === "ے") i++;
+      cons = false;
+    } else if (c === "ں") {
+      out += "ं";
+    } else if (c === "ع") {
+      if (i === 0) out += "अ";
+    } else if (/[۰-۹]/.test(c)) {
+      out += String(c.charCodeAt(0) - 0x6f0);
+      cons = false;
+    } else if (c !== "ء" && c !== "ھ" && c !== "َ") {
+      out += c;
+    }
+  }
+  return out;
+}
+
+const firstReadable = (texts: (string | null | undefined)[]) =>
+  texts.find((t) => t && !URDU.test(t)) ?? texts.find(Boolean) ?? null;
+const inDevanagari = (t: string | null) => (t && URDU.test(t) ? devanagari(t) : t);
+
+/** The first text not in Urdu script, which few listeners here read; else the Urdu, in Devanagari. */
+export const readable = (...texts: (string | null | undefined)[]) =>
+  inDevanagari(firstReadable(texts));
+
+/** LRCLIB's best synced and plain lyrics for a track, preferring a readable script. */
 export async function findLrc(
   track: Pick<Track, "title" | "artist" | "album" | "duration">,
 ): Promise<{ synced: string | null; plain: string | null }> {
@@ -111,24 +228,25 @@ export async function findLrc(
     album_name: track.album,
     duration: String(Math.round(dur)),
   })) as LrcRecord | null;
-  let hit = exact?.syncedLyrics ? exact : null;
 
   // The exact match fails on collaboration credits and remaster lengths.
-  if (!hit) {
-    const found = (await lrclib("search", {
-      track_name: track.title,
-      artist_name: track.artist.split(/\s*[,&]\s*/)[0],
-    })) as LrcRecord[] | null;
-    hit =
-      found?.find(
-        (r) =>
-          r.syncedLyrics && (!dur || Math.abs((r.duration ?? 0) - dur) < 5),
-      ) ?? null;
+  let found: LrcRecord[] = [];
+  if (!exact?.syncedLyrics || URDU.test(exact.syncedLyrics)) {
+    found =
+      ((await lrclib("search", {
+        track_name: track.title,
+        artist_name: track.artist.split(/\s*[,&]\s*/)[0],
+      })) as LrcRecord[] | null) ?? [];
   }
-  return {
-    synced: hit?.syncedLyrics ?? null,
-    plain: exact?.plainLyrics ?? null,
-  };
+  const pool = [
+    ...(exact ? [exact] : []),
+    ...found.filter((r) => !dur || Math.abs((r.duration ?? 0) - dur) < 5),
+  ];
+  const synced = firstReadable(pool.map((r) => r.syncedLyrics));
+  const plain = firstReadable(pool.map((r) => r.plainLyrics));
+  // Readable words beat Urdu timing: the word timer can time plain text from the audio.
+  const urduOnly = synced && URDU.test(synced) && plain && !URDU.test(plain);
+  return { synced: urduOnly ? null : inDevanagari(synced), plain: inDevanagari(plain) };
 }
 
 async function fetchLyrics(track: Track): Promise<Lyrics | null> {
@@ -137,7 +255,9 @@ async function fetchLyrics(track: Track): Promise<Lyrics | null> {
     const data = res?.ok
       ? ((await res.json()) as { lines?: Line[] | null })
       : null;
-    if (data?.lines?.length) return { lines: data.lines };
+    // Timed before Urdu was converted; word for word, so the timings still fit.
+    if (data?.lines?.length)
+      return { lines: data.lines.map((l) => ({ ...l, text: inDevanagari(l.text)! })) };
   }
 
   // Offline, LRCLIB throws; the bundled sheet is still worth showing.
@@ -147,9 +267,11 @@ async function fetchLyrics(track: Track): Promise<Lyrics | null> {
   });
   if (found?.synced) return { lines: parseLrc(found.synced) };
 
-  if (track.lyrics) {
-    const res = await fetch(track.lyrics);
-    if (res.ok) return { plain: await res.text() };
-  }
-  return found?.plain ? { plain: found.plain } : null;
+  const sheet = track.lyrics
+    ? await fetch(track.lyrics)
+        .then((r) => (r.ok ? r.text() : null))
+        .catch(() => null)
+    : null;
+  const plain = readable(sheet, found?.plain);
+  return plain ? { plain } : null;
 }

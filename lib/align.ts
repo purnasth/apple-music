@@ -275,6 +275,49 @@ export function align(
   };
 }
 
+const LEAD = 0.3;
+const SPREAD = 2.5;
+const SUNG = 0.1;
+
+/** Line starts for untimed lyrics: where each line's first paired word was heard. */
+export function timeLines(
+  texts: string[],
+  heard: Heard[],
+): { t: number; text: string }[] {
+  const slots: Slot[] = [];
+  texts.forEach((text, line) =>
+    text.split(" ").forEach((w, word) => slots.push({ line, word, text: w })),
+  );
+  const hit = pair(slots, heard, () => true);
+  const t: (number | null)[] = texts.map((_, i) => {
+    const k = slots.findIndex((s, k) => s.line === i && hit[k] >= 0);
+    return k < 0 ? null : Math.max(0, heard[hit[k]].t - slots[k].word * LEAD);
+  });
+  const len = texts.map((s) => s.length + 1);
+  // A line cannot start before the one before it could be sung; such a pairing is noise.
+  for (let i = 0, prev = -1; i < t.length; i++) {
+    if (t[i] === null) continue;
+    if (prev >= 0 && t[i]! < t[prev]! + len[prev] * SUNG) t[i] = null;
+    else prev = i;
+  }
+  const known = t.flatMap((x, i) => (x === null ? [] : [i]));
+  if (!known.length) return [];
+  for (let i = 0; i < known[0]; i++)
+    t[i] = Math.max(0, t[known[0]]! - (known[0] - i) * SPREAD);
+  for (let n = 0; n < known.length - 1; n++) {
+    const [a, b] = [known[n], known[n + 1]];
+    const span = len.slice(a, b).reduce((x, y) => x + y, 0);
+    for (let i = a + 1, run = len[a]; i < b; run += len[i++])
+      t[i] = t[a]! + ((t[b]! - t[a]!) * run) / span;
+  }
+  const last = known[known.length - 1];
+  for (let i = last + 1; i < t.length; i++) t[i] = t[last]! + (i - last) * SPREAD;
+  const out = texts.map((text, i) => ({ t: t[i]!, text }));
+  for (let i = 1; i < out.length; i++)
+    out[i].t = Math.max(out[i].t, out[i - 1].t + LEAD);
+  return out.map((l) => ({ ...l, t: Math.round(l.t * 100) / 100 }));
+}
+
 type WhisperToken = { text: string; t_dtw?: number };
 type WhisperJson = { transcription: { tokens: WhisperToken[] }[] };
 

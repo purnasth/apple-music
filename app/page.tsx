@@ -41,6 +41,7 @@ import {
   getPlaylists,
   getRecent,
   getSession,
+  current,
   pushRecent,
   savePlaylists,
   fmtTime,
@@ -126,11 +127,14 @@ export default function Home() {
     getLibrary().then(async (lib) => {
       setLibrary(lib);
       setLoaded(true);
-      setRecent(getRecent());
+      setRecent(current(getRecent(), lib));
+      setPlaylists((p) =>
+        Object.fromEntries(Object.entries(p).map(([n, ts]) => [n, current(ts, lib)])),
+      );
       // Bring back the last session's queue, paused where it left off.
       const s = getSession();
       if (s) {
-        setQueue(s.queue);
+        setQueue(current(s.queue, lib));
         setQIndex(Math.min(s.index, s.queue.length - 1));
       }
       // A shared link: #p=<gzipped playlist>. The library has to be in hand
