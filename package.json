@@ -2,6 +2,7 @@
   "name": "apple-music",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.11.0",
   "scripts": {
     "dev": "next dev",
     "prebuild": "node scripts/check-songs.mjs",
@@ -10,7 +11,8 @@
     "lint": "eslint",
     "test": "node --experimental-strip-types --test lib/*.test.ts",
     "songs": "node scripts/build-songs.mjs",
-    "deploy": "npm run songs && NEXT_PUBLIC_ENV=production next build && npx wrangler deploy"
+    "deploy": "pnpm songs && pnpm words --if-available && NEXT_PUBLIC_ENV=production next build && pnpm dlx wrangler deploy",
+    "words": "node --experimental-strip-types --no-warnings scripts/align-lyrics.mjs"
   },
   "dependencies": {
     "framer-motion": "^13.2.0",
@@ -31,5 +33,10 @@
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "unrs-resolver"
+    ]
   }
 }

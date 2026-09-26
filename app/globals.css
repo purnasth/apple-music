@@ -34,6 +34,9 @@
   --radius-sheet: 20px;
 
   --text-xxs: 10px;
+
+  --ease-glide: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-shift: cubic-bezier(0.77, 0, 0.175, 1);
 }
 
 html {
@@ -272,5 +275,327 @@ nav,
   }
   .range {
     --range-h: 6px;
+  }
+}
+
+.stage {
+  display: grid;
+  grid-template-areas: "id" "ctl";
+  justify-items: center;
+  width: 100%;
+  max-width: 32rem;
+  margin-block: auto;
+}
+
+.stage[data-lyrics] {
+  grid-template-areas: "id" "lyr" "ctl";
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  row-gap: 0.5rem;
+  flex: 1;
+  min-height: 0;
+  margin-block: 0;
+}
+
+@media (width >= 64rem) {
+  .stage[data-lyrics] {
+    max-width: 68rem;
+    grid-template-areas: "id lyr" "ctl lyr";
+    grid-template-columns: 21rem minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-content: center;
+    column-gap: 4.5rem;
+  }
+}
+
+.stage-lyrics {
+  grid-area: lyr;
+  justify-self: stretch;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  view-transition-name: lyrics;
+}
+
+/* Absolute, so the number of lines cannot grow the grid row. */
+.stage-lyrics-view {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-block: 2rem 45vh;
+  mask-image: linear-gradient(transparent, #000 12%, #000 80%, transparent);
+  scrollbar-width: none;
+}
+
+.stage-lyrics-view::-webkit-scrollbar {
+  display: none;
+}
+
+.stage-id {
+  grid-area: id;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+.stage-ctl {
+  grid-area: ctl;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.stage-art {
+  width: min(46vh, 78vw);
+  border-radius: var(--radius-sheet);
+  view-transition-name: cover;
+}
+
+.stage-meta {
+  margin-top: 1.5rem;
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+
+.stage-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.stage[data-lyrics] .stage-id {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.875rem;
+  padding-bottom: 0.25rem;
+}
+.stage[data-lyrics] .stage-art {
+  width: 3.25rem;
+  border-radius: var(--radius-control);
+}
+.stage[data-lyrics] .stage-meta {
+  margin-top: 0;
+  flex: 1;
+  text-align: left;
+}
+.stage[data-lyrics] .stage-title {
+  font-size: 1rem;
+}
+.stage[data-lyrics] .stage-aside {
+  display: none;
+}
+
+@media (width >= 64rem) {
+  .stage[data-lyrics] .stage-id {
+    flex-direction: column;
+    gap: 0;
+    padding-bottom: 0;
+  }
+  .stage[data-lyrics] .stage-art {
+    width: 100%;
+    border-radius: var(--radius-sheet);
+  }
+  .stage[data-lyrics] .stage-meta {
+    margin-top: 1.5rem;
+    flex: none;
+    text-align: center;
+  }
+  .stage[data-lyrics] .stage-title {
+    font-size: 1.5rem;
+  }
+  .stage[data-lyrics] .stage-aside {
+    display: block;
+  }
+}
+
+::view-transition-group(*) {
+  animation-duration: 300ms;
+  animation-timing-function: var(--ease-glide);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
+}
+::view-transition-old(cover),
+::view-transition-new(cover) {
+  animation-duration: 300ms;
+  height: 100%;
+}
+::view-transition-new(lyrics):only-child {
+  animation: lyrics-in 300ms var(--ease-glide) both;
+}
+::view-transition-old(lyrics):only-child {
+  animation: lyrics-out 150ms var(--ease-glide) both;
+}
+
+@keyframes lyrics-in {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    translate: 0 6px;
+  }
+}
+@keyframes lyrics-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.lyrics-body {
+  animation: lyrics-fade 260ms var(--ease-glide) both;
+}
+@keyframes lyrics-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.stage-lyrics-view[data-empty] {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding-block: 0;
+  overflow: hidden;
+  mask-image: none;
+}
+
+.lyric-plain {
+  white-space: pre-line;
+  font-size: clamp(1.1rem, 0.7vw + 0.95rem, 1.45rem);
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: -0.015em;
+  color: rgb(255 255 255 / 0.78);
+}
+
+.lyric-line {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: clamp(1.3rem, 1vw + 1.05rem, 1.9rem);
+  font-weight: 600;
+  line-height: 1.26;
+  letter-spacing: -0.02em;
+  padding-block: 0.42em;
+  color: #fff;
+  opacity: 0.3;
+  scale: 0.985;
+  transform-origin: left center;
+  transition:
+    opacity 420ms var(--ease-glide),
+    scale 420ms var(--ease-glide);
+}
+
+.lyric-line[data-state="soon"] {
+  opacity: calc(0.66 - var(--d, 4) * 0.08);
+}
+.lyric-line[data-state="now"] {
+  opacity: 1;
+  scale: 1;
+  /* drop-shadow, not text-shadow: text-shadow paints over a background-clip fill. */
+  filter: drop-shadow(0 0 0.6em rgb(255 255 255 / 0.18));
+}
+
+/* Inline, so a wrapped line fills in reading order. */
+.lyric-text {
+  display: inline;
+}
+.lyric-line[data-state="now"] .lyric-text {
+  background-image: linear-gradient(
+    90deg,
+    #fff calc(var(--p, 0) * (100% + 2em) - 2em),
+    rgb(255 255 255 / 0.4) calc(var(--p, 0) * (100% + 2em))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.lyric-line .w {
+  display: inline-block;
+  transition:
+    color 180ms var(--ease-glide),
+    translate 260ms var(--ease-glide);
+}
+.lyric-line[data-state="now"] .w {
+  color: rgb(255 255 255 / 0.4);
+}
+.lyric-line[data-state="now"] .w[data-w="sung"] {
+  color: #fff;
+  translate: 0 -0.05em;
+}
+.lyric-line[data-state="now"] .w[data-w="now"] {
+  translate: 0 -0.05em;
+  background-image: linear-gradient(
+    90deg,
+    #fff calc(var(--p, 0) * (100% + 0.6em) - 0.6em),
+    rgb(255 255 255 / 0.4) calc(var(--p, 0) * (100% + 0.6em))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.interlude {
+  display: inline-flex;
+  gap: 0.45rem;
+  padding-block: 0.35em;
+  transform-origin: left center;
+}
+.interlude i {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: clamp(0.35, calc(0.35 + (var(--p, 0) * 3 - var(--i)) * 0.65), 1);
+  transition: opacity 200ms linear;
+}
+.lyric-line[data-state="now"] .interlude {
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  50% {
+    scale: 1.14;
+  }
+}
+
+/* Touch fires a phantom hover on tap. */
+@media (hover: hover) and (pointer: fine) {
+  .lyric-line:hover {
+    opacity: 0.8;
+  }
+  .lyric-line[data-state="now"]:hover {
+    opacity: 1;
+  }
+}
+
+.lyric-line:active {
+  scale: 0.975;
+  transition-duration: 120ms;
+}
+
+.lyric-line:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 4px;
+  border-radius: 6px;
+  opacity: 1;
+}
+
+/* The global reduced-motion rule shortens durations but leaves resting transforms. */
+@media (prefers-reduced-motion: reduce) {
+  .lyric-line,
+  .lyric-line:active {
+    scale: 1;
+  }
+  /* A near-zero duration would spin this loop at frame rate. */
+  .lyric-line[data-state="now"] .interlude {
+    animation: none;
+  }
+  .lyric-line .w {
+    translate: none !important;
   }
 }

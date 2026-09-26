@@ -14,6 +14,10 @@ export type Track = {
   duration?: number;
   /** Immediate parent folder when imported via the folder picker (new, OG, temp…). */
   folder?: string;
+  /** Plain lyrics embedded in the file. */
+  lyrics?: string;
+  /** Word timings from `pnpm words`. */
+  words?: string;
 };
 
 /* ---------- Deezer search (public API, no key) ----------

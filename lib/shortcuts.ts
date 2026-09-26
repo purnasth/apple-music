@@ -12,7 +12,7 @@
  *
  * Grouped rather than flat so the sheet can lay them out in columns instead of
  * one long striped list. The order is the layout: CSS balances the four blocks
- * into two columns, and this order splits them 10 rows and 10.
+ * into two columns, and this order splits them about evenly.
  */
 export const SHORTCUT_GROUPS: {
   title: string;
@@ -33,7 +33,8 @@ export const SHORTCUT_GROUPS: {
     items: [
       { keys: ["I"], label: "Full view, queue and all" },
       { keys: ["F"], label: "Full screen, queue hidden" },
-      { keys: ["Esc"], label: "Leave the full view" },
+      { keys: ["Y"], label: "Lyrics" },
+      { keys: ["Esc"], label: "Close the lyrics, then the view" },
       { keys: ["/"], label: "Jump to search" },
       { keys: ["?"], label: "Show this list" },
     ],

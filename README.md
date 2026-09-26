@@ -17,6 +17,14 @@ with no database, no accounts, and no backend to run.
   works offline.
 - **Playlists** stored in `localStorage`, freely mixing catalogue tracks and
   your own files.
+- **Lyrics** in the full-screen view (button, or `Y`): time-synced lines from
+  [LRCLIB](https://lrclib.net), falling back to the plain lyrics embedded in
+  your own files. Bundled songs can be timed to the word offline (`pnpm
+  words`, run by the deploy; see DEPLOY.md); the rest fill line by line. The current line fills as it is sung, tapping any line seeks
+  there, and scrolling away offers a way back. Timing runs on one animation-frame
+  clock reading the audio directly, so React re-renders only when the line
+  changes. Opening and closing is a native view transition, not a layout
+  animation.
 
 ## A note on catalogue playback
 
@@ -38,10 +46,11 @@ There is no server component to any of this — `next.config.ts` sets
 ## Running locally
 
 ```bash
-npm install
-npm run dev      # http://localhost:3000
-npm test         # smoke tests against the live search API
-npm run build    # static export into ./out
+pnpm install
+pnpm dev         # http://localhost:3000
+pnpm test        # unit tests, plus smoke tests against the live search API
+pnpm build       # static export into ./out
+pnpm run deploy  # publish; see DEPLOY.md (not `pnpm deploy`, a pnpm built-in)
 ```
 
 ## Deploying
@@ -49,10 +58,10 @@ npm run build    # static export into ./out
 The build output is a static directory, so it hosts anywhere. For Cloudflare
 Pages:
 
-- **Build command:** `npm run build`
+- **Build command:** `pnpm build`
 - **Output directory:** `out`
 
-Or directly: `npx wrangler pages deploy out`
+Or directly: `pnpm dlx wrangler pages deploy out`
 
 ## Layout
 
@@ -60,5 +69,9 @@ Or directly: `npx wrangler pages deploy out`
 app/page.tsx          search, library and playlist UI
 components/Player.tsx player bar, playback and MediaSession wiring
 lib/music.ts          search, IndexedDB library, playlist persistence
+components/Lyrics.tsx lyrics panel: frame clock, sweep, follow and hold
+lib/lyrics.ts         LRC parsing, line and word lookup, sweep pacing, LRCLIB lookup
+lib/align.ts          word timing by forced alignment, build time only
+scripts/align-lyrics.mjs  runs whisper.cpp over the library for lib/align.ts
 lib/music.test.ts     smoke tests
 ```
