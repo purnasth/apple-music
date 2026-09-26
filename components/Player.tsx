@@ -17,6 +17,7 @@ import {
   TbVolumeOff,
   TbX,
 } from "react-icons/tb";
+import { Logo } from "@/components/Logo";
 import { toast } from "@/lib/toast";
 import {
   Track,
@@ -77,6 +78,7 @@ export default function Player({
   const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
+  const artLum = useLuminance(track?.artwork);
   const lyricsless = !!track && noLyrics === track.id;
   const lyricsOn = showLyrics && !lyricsless;
 
@@ -597,10 +599,12 @@ export default function Player({
                 onClick={() => setPlaying(!playing)}
                 aria-label={playing ? "Pause" : "Play"}
                 title={playing ? "Pause" : "Play"}
-                className="grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
+                className="group grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
               >
                 {playing ? (
-                  <TbPlayerPauseFilled size={18} />
+                  <span className="morph-out">
+                    <Logo size={20} live art={track.artwork} tone={markTone(artLum)} className="live-mark" />
+                  </span>
                 ) : (
                   <TbPlayerPlayFilled size={18} className="ml-0.5" />
                 )}
@@ -678,6 +682,40 @@ function Btn({
   );
 }
 
+/** Brightness scale that keeps the cover-filled mark visible on the light play button. */
+const markTone = (lum: number | null) => (lum === null ? 0.6 : Math.min(1, 0.3 / lum));
+
+/** Average luminance (0–1) of an image, or null when it can't be read (no CORS, no art). */
+function useLuminance(src?: string) {
+  const [lum, setLum] = useState<number | null>(null);
+  useEffect(() => {
+    if (!src) return;
+    const img = document.createElement("img");
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const c = document.createElement("canvas");
+        c.width = c.height = 8;
+        const g = c.getContext("2d")!;
+        g.drawImage(img, 0, 0, 8, 8);
+        const d = g.getImageData(0, 0, 8, 8).data;
+        let sum = 0;
+        for (let i = 0; i < d.length; i += 4)
+          sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+        setLum(sum / 64 / 255);
+      } catch {
+        setLum(null);
+      }
+    };
+    img.onerror = () => setLum(null);
+    img.src = src;
+    return () => {
+      img.onload = img.onerror = null;
+    };
+  }, [src]);
+  return lum;
+}
+
 /** Fills the page (not the browser) — the cover blurred behind itself, queue on the left. */
 function FullView({
   track,
@@ -741,24 +779,29 @@ function FullView({
   onClose: () => void;
 }) {
   const art = track.artworkLarge ?? track.artwork;
+  const lum = useLuminance(art);
+  const dim = Math.min((lum === null ? 0.45 : 0.25 + lum * 0.5) + (showLyrics ? 0.2 : 0), 0.85);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-canvas text-white">
       {/* The cover doubles as its own backdrop — the ambient wash with no colour API. */}
       {art && (
-        <img
-          src={art}
-          alt=""
+        <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover blur-3xl saturate-150"
-        />
+          data-playing={playing || undefined}
+          className="flow pointer-events-none absolute inset-0"
+        >
+          <img src={art} alt="" className="flow-base" />
+          {[0, 1, 2, 3].map((i) => (
+            <img key={i} src={art} alt="" />
+          ))}
+        </div>
       )}
       {/* The Clear variant floats over media; artwork can be bright, so it gets a
           dimming layer to keep the controls legible (HIG — Liquid Glass > Clear). */}
       <div
-        className={`pointer-events-none absolute inset-0 transition-colors duration-300 ease-glide ${
-          showLyrics ? "bg-black/72" : "bg-black/55"
-        }`}
+        className="pointer-events-none absolute inset-0 transition-colors duration-300 ease-glide"
+        style={{ backgroundColor: `rgb(0 0 0 / ${dim})` }}
       />
 
       <button
@@ -796,7 +839,7 @@ function FullView({
                     <span className="grid w-4 shrink-0 place-items-center text-[10px] tabular-nums text-white/60">
                       {current ? (
                         playing ? (
-                          <TbPlayerPlayFilled className="text-accent" />
+                          <Logo size={14} className="spin-mark text-accent" />
                         ) : (
                           <TbPlayerPauseFilled className="text-accent" />
                         )
@@ -876,17 +919,17 @@ function FullView({
 
               <div className="stage-meta">
                 <h2 className="stage-title truncate">{track.title}</h2>
-                <p className="mt-1 truncate text-sm text-white/70">
+                <p className="mt-1 truncate text-sm text-white/85">
                   {track.artist}
                   {isPreview(track) ? " · 30s preview" : ""}
                 </p>
                 {track.album && (
-                  <p className="stage-aside mt-0.5 truncate text-xs text-white/50">
+                  <p className="stage-aside mt-0.5 truncate text-xs text-white/70">
                     {track.album}
                   </p>
                 )}
                 {loading && (
-                  <p className="stage-aside mt-2 text-xs text-white/60">
+                  <p className="stage-aside mt-2 text-xs text-white/75">
                     Loading…
                   </p>
                 )}
@@ -900,7 +943,7 @@ function FullView({
 
             <div className="stage-ctl">
               <div className="mt-5 flex w-full items-center gap-3">
-                <span className="w-10 text-right text-xs tabular-nums text-white/60">
+                <span className="w-10 text-right text-xs tabular-nums text-white/80">
                   {fmtTime(time)}
                 </span>
                 <input
@@ -914,7 +957,7 @@ function FullView({
                   style={filled(time, dur, buffered)}
                   aria-label="Seek"
                 />
-                <span className="w-10 text-xs tabular-nums text-white/60">
+                <span className="w-10 text-xs tabular-nums text-white/80">
                   {fmtTime(dur)}
                 </span>
               </div>
@@ -930,10 +973,12 @@ function FullView({
                   onClick={() => setPlaying(!playing)}
                   aria-label={playing ? "Pause" : "Play"}
                   title={playing ? "Pause" : "Play"}
-                  className="grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 transition hover:scale-105 active:scale-95"
+                  className="group grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 transition hover:scale-105 active:scale-95"
                 >
                   {playing ? (
-                    <TbPlayerPauseFilled size={22} />
+                    <span className="morph-out">
+                      <Logo size={28} live art={art} tone={markTone(lum)} className="live-mark" />
+                    </span>
                   ) : (
                     <TbPlayerPlayFilled size={22} className="ml-1" />
                   )}
@@ -960,7 +1005,7 @@ function FullView({
                   aria-label={muted ? "Unmute" : "Mute"}
                   title={muted ? "Unmute (M)" : "Mute (M)"}
                   aria-pressed={muted}
-                  className="shrink-0 text-white/60 transition hover:text-white"
+                  className="shrink-0 text-white/80 transition hover:text-white"
                 >
                   {muted ? <TbVolumeOff size={16} /> : <TbVolume size={16} />}
                 </button>

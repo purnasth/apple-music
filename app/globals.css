@@ -345,6 +345,12 @@ nav,
   flex-direction: column;
   align-items: center;
   width: 100%;
+  --color-label: #fff;
+  --color-label-2: rgb(255 255 255 / 0.85);
+  filter: drop-shadow(0 1px 3px rgb(0 0 0 / 0.3));
+}
+.stage-meta {
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
 }
 
 .stage-art {
@@ -597,5 +603,178 @@ nav,
   }
   .lyric-line .w {
     translate: none !important;
+  }
+}
+
+.flow {
+  scale: 1.3;
+  filter: blur(80px) saturate(1.8) brightness(1.05);
+}
+.flow .flow-base {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.flow img:not(.flow-base) {
+  position: absolute;
+  width: 75vmax;
+  height: 75vmax;
+  object-fit: cover;
+  border-radius: 50%;
+  animation:
+    flow 32s linear infinite,
+    wander 19s ease-in-out infinite alternate;
+  animation-play-state: paused;
+}
+.flow[data-playing] img:not(.flow-base) {
+  animation-play-state: running;
+}
+.flow img:nth-child(2) {
+  top: -25vmax;
+  left: -20vmax;
+  transform-origin: 70% 70%;
+}
+.flow img:nth-child(3) {
+  right: -25vmax;
+  bottom: -25vmax;
+  transform-origin: 30% 30%;
+  rotate: 120deg;
+  animation-duration: 41s, 23s;
+  animation-direction: reverse, alternate-reverse;
+}
+.flow img:nth-child(4) {
+  top: -15vmax;
+  right: -20vmax;
+  transform-origin: 20% 80%;
+  rotate: 240deg;
+  animation-duration: 50s, 17s;
+  animation-delay: 0s, -9s;
+}
+.flow img:nth-child(5) {
+  bottom: -20vmax;
+  left: -15vmax;
+  width: 60vmax;
+  height: 60vmax;
+  transform-origin: 80% 20%;
+  rotate: 60deg;
+  animation-duration: 36s, 27s;
+  animation-direction: reverse, alternate;
+  animation-delay: 0s, -14s;
+}
+@keyframes flow {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@keyframes wander {
+  from {
+    translate: -8vmax 5vmax;
+    scale: 0.9;
+  }
+  to {
+    translate: 9vmax -6vmax;
+    scale: 1.2;
+  }
+}
+
+.spin-mark {
+  animation: spin-mark 3s linear infinite;
+}
+@keyframes spin-mark {
+  to {
+    rotate: 1turn;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow img:not(.flow-base),
+  .spin-mark {
+    animation: none;
+  }
+}
+
+.live-mark {
+  animation: groove 2.4s ease-in-out infinite;
+}
+@keyframes groove {
+  25% {
+    scale: 1.05 0.96;
+    rotate: -5deg;
+  }
+  50% {
+    scale: 0.97 1.03;
+    rotate: 0deg;
+  }
+  75% {
+    scale: 1.05 0.96;
+    rotate: 5deg;
+  }
+}
+.live-art {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: spin-mark 8s linear infinite;
+}
+.live-note {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hop-note 1.2s ease-in-out infinite;
+}
+@keyframes hop-note {
+  0%,
+  100% {
+    rotate: -16deg;
+    translate: 0 0;
+    scale: 0.96;
+  }
+  25% {
+    rotate: 0deg;
+    translate: 0 -2.5px;
+    scale: 1.08;
+  }
+  50% {
+    rotate: 16deg;
+    translate: 0 0;
+    scale: 0.96;
+  }
+  75% {
+    rotate: 0deg;
+    translate: 0 -2.5px;
+    scale: 1.08;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-mark,
+  .live-art,
+  .live-note {
+    animation: none;
+  }
+}
+
+/* Same vertex count in both polygons so clip-path can interpolate moon -> pause bars. */
+.morph-out {
+  display: grid;
+  clip-path: polygon(50.0% 50.0%, 50.0% 43.1%, 50.0% 36.3%, 50.0% 29.4%, 50.0% 22.6%, 50.0% 15.7%, 50.0% 8.9%, 50.0% 2.0%, 47.2% -1.9%, 40.4% -1.1%, 33.7% 0.6%, 27.4% 3.2%, 21.4% 6.6%, 16.0% 10.7%, 11.1% 15.5%, 6.9% 20.9%, 3.4% 26.8%, 0.8% 33.2%, -1.0% 39.8%, -1.9% 46.6%, -1.9% 53.4%, -1.0% 60.2%, 0.8% 66.8%, 3.4% 73.2%, 6.9% 79.1%, 11.1% 84.5%, 16.0% 89.3%, 21.4% 93.4%, 27.4% 96.8%, 33.7% 99.4%, 40.4% 101.1%, 47.2% 101.9%, 50.0% 98.0%, 50.0% 91.1%, 50.0% 84.3%, 50.0% 77.4%, 50.0% 70.6%, 50.0% 63.7%, 50.0% 56.9%, 50.0% 50.0%, 50.0% 50.0%, 50.0% 43.1%, 50.0% 36.3%, 50.0% 29.4%, 50.0% 22.6%, 50.0% 15.7%, 50.0% 8.9%, 50.0% 2.0%, 52.8% -1.9%, 59.6% -1.1%, 66.3% 0.6%, 72.6% 3.2%, 78.6% 6.6%, 84.0% 10.7%, 88.9% 15.5%, 93.1% 20.9%, 96.6% 26.8%, 99.2% 33.2%, 101.0% 39.8%, 101.9% 46.6%, 101.9% 53.4%, 101.0% 60.2%, 99.2% 66.8%, 96.6% 73.2%, 93.1% 79.1%, 88.9% 84.5%, 84.0% 89.3%, 78.6% 93.4%, 72.6% 96.8%, 66.3% 99.4%, 59.6% 101.1%, 52.8% 101.9%, 50.0% 98.0%, 50.0% 91.1%, 50.0% 84.3%, 50.0% 77.4%, 50.0% 70.6%, 50.0% 63.7%, 50.0% 56.9%, 50.0% 50.0%);
+  transition: clip-path 420ms var(--ease-glide);
+}
+.mark-fill {
+  opacity: 0;
+  transition: opacity 160ms var(--ease-glide);
+}
+.group:focus-visible .morph-out {
+  clip-path: polygon(42.0% 50.0%, 42.0% 46.1%, 42.0% 42.2%, 42.0% 38.4%, 42.0% 34.5%, 42.0% 30.6%, 42.0% 26.7%, 41.9% 22.8%, 39.7% 19.8%, 35.9% 19.0%, 32.0% 19.0%, 28.2% 19.1%, 24.9% 21.1%, 24.0% 24.8%, 24.0% 28.6%, 24.0% 32.5%, 24.0% 36.4%, 24.0% 40.3%, 24.0% 44.2%, 24.0% 48.1%, 24.0% 51.9%, 24.0% 55.8%, 24.0% 59.7%, 24.0% 63.6%, 24.0% 67.5%, 24.0% 71.4%, 24.0% 75.2%, 24.9% 78.9%, 28.2% 80.9%, 32.0% 81.0%, 35.9% 81.0%, 39.7% 80.2%, 41.9% 77.2%, 42.0% 73.3%, 42.0% 69.4%, 42.0% 65.5%, 42.0% 61.6%, 42.0% 57.8%, 42.0% 53.9%, 42.0% 50.0%, 58.0% 50.0%, 58.0% 46.1%, 58.0% 42.2%, 58.0% 38.4%, 58.0% 34.5%, 58.0% 30.6%, 58.0% 26.7%, 58.1% 22.8%, 60.3% 19.8%, 64.1% 19.0%, 68.0% 19.0%, 71.8% 19.1%, 75.1% 21.1%, 76.0% 24.8%, 76.0% 28.6%, 76.0% 32.5%, 76.0% 36.4%, 76.0% 40.3%, 76.0% 44.2%, 76.0% 48.1%, 76.0% 51.9%, 76.0% 55.8%, 76.0% 59.7%, 76.0% 63.6%, 76.0% 67.5%, 76.0% 71.4%, 76.0% 75.2%, 75.1% 78.9%, 71.8% 80.9%, 68.0% 81.0%, 64.1% 81.0%, 60.3% 80.2%, 58.1% 77.2%, 58.0% 73.3%, 58.0% 69.4%, 58.0% 65.5%, 58.0% 61.6%, 58.0% 57.8%, 58.0% 53.9%, 58.0% 50.0%);
+}
+.group:focus-visible .morph-out .mark-fill {
+  opacity: 1;
+}
+@media (hover: hover) {
+  .group:hover .morph-out {
+    clip-path: polygon(42.0% 50.0%, 42.0% 46.1%, 42.0% 42.2%, 42.0% 38.4%, 42.0% 34.5%, 42.0% 30.6%, 42.0% 26.7%, 41.9% 22.8%, 39.7% 19.8%, 35.9% 19.0%, 32.0% 19.0%, 28.2% 19.1%, 24.9% 21.1%, 24.0% 24.8%, 24.0% 28.6%, 24.0% 32.5%, 24.0% 36.4%, 24.0% 40.3%, 24.0% 44.2%, 24.0% 48.1%, 24.0% 51.9%, 24.0% 55.8%, 24.0% 59.7%, 24.0% 63.6%, 24.0% 67.5%, 24.0% 71.4%, 24.0% 75.2%, 24.9% 78.9%, 28.2% 80.9%, 32.0% 81.0%, 35.9% 81.0%, 39.7% 80.2%, 41.9% 77.2%, 42.0% 73.3%, 42.0% 69.4%, 42.0% 65.5%, 42.0% 61.6%, 42.0% 57.8%, 42.0% 53.9%, 42.0% 50.0%, 58.0% 50.0%, 58.0% 46.1%, 58.0% 42.2%, 58.0% 38.4%, 58.0% 34.5%, 58.0% 30.6%, 58.0% 26.7%, 58.1% 22.8%, 60.3% 19.8%, 64.1% 19.0%, 68.0% 19.0%, 71.8% 19.1%, 75.1% 21.1%, 76.0% 24.8%, 76.0% 28.6%, 76.0% 32.5%, 76.0% 36.4%, 76.0% 40.3%, 76.0% 44.2%, 76.0% 48.1%, 76.0% 51.9%, 76.0% 55.8%, 76.0% 59.7%, 76.0% 63.6%, 76.0% 67.5%, 76.0% 71.4%, 76.0% 75.2%, 75.1% 78.9%, 71.8% 80.9%, 68.0% 81.0%, 64.1% 81.0%, 60.3% 80.2%, 58.1% 77.2%, 58.0% 73.3%, 58.0% 69.4%, 58.0% 65.5%, 58.0% 61.6%, 58.0% 57.8%, 58.0% 53.9%, 58.0% 50.0%);
+  }
+  .group:hover .morph-out .mark-fill {
+    opacity: 1;
   }
 }
