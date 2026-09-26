@@ -71,11 +71,18 @@ export default function Player({
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
+  /** The listener's choice: words up or not. Survives songs that have none. */
   const [showLyrics, setShowLyrics] = useState(false);
+  /** Id of the current song once it is known to have no lyrics at all. */
+  const [noLyrics, setNoLyrics] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
+  const lyricsless = !!track && noLyrics === track.id;
+  // What is on screen. A song without lyrics shows the cover even with the
+  // words switched on, and the next song that has them brings them back.
+  const lyricsOn = showLyrics && !lyricsless;
 
   /**
    * The inline message stays — it marks *this* track as broken for as long as it
@@ -114,17 +121,39 @@ export default function Player({
    * ::view-transition rules in globals.css. Keyboard toggles skip it — a key is
    * pressed far too often to be made to wait for an animation.
    */
-  const toggleLyrics = () => {
-    const to = !showLyrics;
+  const transition = (change: () => void) => {
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (calm || !document.startViewTransition) return setShowLyrics(to);
+    if (calm || !document.startViewTransition) return change();
     // A transition is skipped, not failed, when the tab is hidden or a second
     // tap lands mid-flight; the state change still applies. Its `ready`
     // promise rejects then, and that is expected, not an error.
-    document
-      .startViewTransition(() => flushSync(() => setShowLyrics(to)))
-      .ready.catch(() => {});
+    document.startViewTransition(() => flushSync(change)).ready.catch(() => {});
   };
+  const toggleLyrics = () => {
+    if (!lyricsless) transition(() => setShowLyrics(!showLyrics));
+  };
+
+  // Does this song have lyrics at all? Asked as soon as the full view — the only
+  // place with a lyrics button — is open, so the button can say "none" before
+  // anyone presses it, rather than opening onto an empty panel. It is the same
+  // cached lookup the panel makes, so opening the words afterwards is instant.
+  // A failed lookup (offline) proves nothing, so it leaves the button alone.
+  useEffect(() => {
+    if (!track || !full) return;
+    let gone = false;
+    getLyrics(track)
+      .then((l) => {
+        if (gone || l) return;
+        const mark = () => setNoLyrics(track.id);
+        // Words already up for a song that turns out to have none: step back
+        // to the cover the same way closing them does, not with a jump.
+        if (document.querySelector(".stage[data-lyrics]")) transition(mark);
+        else mark();
+      })
+      .catch(() => {});
+    return () => void (gone = true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track?.id, full]);
 
   /** The queue comes back with the view, but only where there is room for it. */
   const openFull = (withQueue: boolean) => {
@@ -327,12 +356,16 @@ export default function Player({
         // Steps down one layer at a time, the way F does, rather than throwing
         // away the whole view when all you wanted was the words gone.
         case "Escape":
-          if (showLyrics) return setShowLyrics(false);
+          if (lyricsOn) return setShowLyrics(false);
           return setFull(false);
         case "KeyY":
           e.preventDefault();
+          // The button says this by being dimmed; a key press has nothing to
+          // look at, so it gets told.
+          if (lyricsless)
+            return void toast("No lyrics for this song", { id: "lyrics" });
           if (!full) openFull(false);
-          return setShowLyrics(!showLyrics);
+          return setShowLyrics(!lyricsOn);
         case "Space":
         case "KeyK":
           e.preventDefault();
@@ -398,6 +431,8 @@ export default function Player({
     full,
     showQueue,
     showLyrics,
+    lyricsOn,
+    lyricsless,
     playing,
     shuffle,
     repeat,
@@ -477,7 +512,8 @@ export default function Player({
           setMuted={setMuted}
           showQueue={showQueue}
           setShowQueue={setShowQueue}
-          showLyrics={showLyrics}
+          showLyrics={lyricsOn}
+          lyricsless={lyricsless}
           toggleLyrics={toggleLyrics}
           audio={audioRef}
           error={error}
@@ -634,25 +670,36 @@ export default function Player({
   );
 }
 
+/**
+ * `unavailable` dims the button and says why, rather than removing it: a control
+ * that vanishes on some songs moves its neighbours and leaves people hunting for
+ * it. aria-disabled rather than disabled, so it stays focusable and hoverable and
+ * the reason in its tooltip can actually be read.
+ */
 function Btn({
   onClick,
   children,
   active,
   label,
+  unavailable,
 }: {
   onClick: () => void;
   children: React.ReactNode;
   active?: boolean;
   label: string;
+  unavailable?: string | false;
 }) {
   return (
     <button
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      aria-pressed={active}
-      className={`grid h-8 w-8 place-items-center rounded-full text-sm transition hover:bg-fill active:scale-95 ${
-        active ? "text-accent" : "text-label-2 hover:text-label"
+      onClick={unavailable ? undefined : onClick}
+      aria-label={unavailable ? `${label}: ${unavailable}` : label}
+      title={unavailable || label}
+      aria-pressed={unavailable ? undefined : active}
+      aria-disabled={unavailable ? true : undefined}
+      className={`grid h-8 w-8 place-items-center rounded-full text-sm transition ${
+        unavailable
+          ? "cursor-not-allowed text-label-2 opacity-35"
+          : `hover:bg-fill active:scale-95 ${active ? "text-accent" : "text-label-2 hover:text-label"}`
       }`}
     >
       {children}
@@ -686,6 +733,7 @@ function FullView({
   showQueue,
   setShowQueue,
   showLyrics,
+  lyricsless,
   toggleLyrics,
   audio,
   error,
@@ -715,6 +763,7 @@ function FullView({
   showQueue: boolean;
   setShowQueue: (s: boolean) => void;
   showLyrics: boolean;
+  lyricsless: boolean;
   toggleLyrics: () => void;
   audio: RefObject<HTMLAudioElement | null>;
   error: string | null;
@@ -934,7 +983,12 @@ function FullView({
                 <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
                   <TbRepeat size={18} />
                 </Btn>
-                <Btn onClick={toggleLyrics} active={showLyrics} label="Lyrics">
+                <Btn
+                  onClick={toggleLyrics}
+                  active={showLyrics}
+                  label="Lyrics"
+                  unavailable={lyricsless && "No lyrics for this song"}
+                >
                   <TbMicrophone2 size={18} />
                 </Btn>
               </div>
