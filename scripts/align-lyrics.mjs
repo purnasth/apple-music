@@ -52,7 +52,8 @@ const tally = { timed: 0, weak: 0, noLyrics: 0, cached: 0, failed: 0 };
 for (const [n, t] of tracks.entries()) {
   const out = join(OUT, wordsFile(t.preview));
   const label = `[${n + 1}/${tracks.length}] ${t.artist} — ${t.title}`;
-  const prior = force ? null : await readFile(out, 'utf8').then(JSON.parse, () => null);
+  // An unreadable file is redone, like a missing one.
+  const prior = force ? null : await readFile(out, 'utf8').then(JSON.parse).catch(() => null);
   // Written before untimed lyrics could be timed from the audio.
   if (prior && prior.why !== 'no synced lyrics') {
     tally.cached++;

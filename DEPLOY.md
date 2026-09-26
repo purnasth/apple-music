@@ -86,6 +86,13 @@ line starts where its first word was heard, unheard lines are spaced between the
 neighbours, and the words are then placed as above. The log marks these "lines
 timed from the audio".
 
+Lyrics are kept in a script listeners here read. Of LRCLIB's matches, the first
+not in Urdu script wins, and readable plain text beats Urdu-only timing. When only
+Urdu exists, it is converted to Devanagari (`devanagari` in `lib/lyrics.ts`),
+which now and then guesses a short vowel wrong. Timings made from Urdu text are
+converted as the site reads them; `pnpm words --force <title>` redoes one from a
+readable version if LRCLIB has one.
+
 ```
 pnpm words               # every song not done yet
 pnpm words kasoor        # only titles/artists containing "kasoor"

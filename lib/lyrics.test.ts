@@ -75,4 +75,7 @@ test("devanagari converts Urdu and leaves LRC stamps alone", () => {
   assert.equal(devanagari("کیا پیار"), "क्या प्यार", "a medial ye before a vowel joins");
   assert.equal(devanagari("دکھ بہہ"), "दख बह", "aspirates join; a doubled he is one");
   assert.equal(devanagari("Latin stays"), "Latin stays");
+  // Timings are per word, so conversion must never split or join words.
+  const line = "دلِ بے‌چین، تیرے لیے؟ ہم";
+  assert.equal(devanagari(line).split(" ").length, line.split(" ").length);
 });
