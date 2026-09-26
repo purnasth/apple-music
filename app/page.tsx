@@ -10,7 +10,6 @@ import {
   TbFolderPlus,
   TbLibrary,
   TbMusic,
-  TbPlayerPauseFilled,
   TbPlayerPlayFilled,
   TbPlaylist,
   TbPlus,
@@ -1358,7 +1357,9 @@ function Row({
           }`}
         >
           {playing ? (
-            <TbPlayerPauseFilled size={15} />
+            <span className="morph-out">
+              <Logo size={16} className="spin-mark" />
+            </span>
           ) : (
             <TbPlayerPlayFilled size={15} />
           )}
