@@ -1,10 +1,11 @@
-// Times the bundled library's lyrics to the word. Slow and offline by design:
-// run it after `npm run songs`, it writes public/songs-words/, and the next
-// `npm run songs` points the manifest at what it wrote.
+// Times the bundled library's lyrics to the word, writes public/songs-words/,
+// and points public/songs.json at the results. Part of `pnpm run deploy`, after
+// `pnpm songs`; finished songs are cached, so a deploy only pays for new ones.
 //
-//   npm run words                 every track not yet done
-//   npm run words -- story        only titles/artists containing "story"
-//   npm run words -- --force      redo tracks already done
+//   pnpm words                    every track not yet done
+//   pnpm words story              only titles/artists containing "story"
+//   pnpm words --force            redo tracks already done
+//   pnpm words --if-available     skip quietly-but-visibly without whisper (deploy)
 //
 // Needs whisper.cpp (`brew install whisper-cpp`) and a model; see DEPLOY.md.
 // Each track: afconvert decodes the audio to 16 kHz WAV (built into macOS),
@@ -18,10 +19,10 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { align, heardWords, languageOf } from '../lib/align.ts';
 import { findLrc, parseLrc } from '../lib/lyrics.ts';
-import { wordsFile } from './words-key.mjs';
+import { WORDS, attachWords, wordsFile } from './words-key.mjs';
 
 const run = promisify(execFile);
-const OUT = 'public/songs-words';
+const OUT = WORDS;
 const MODEL = process.env.WHISPER_MODEL ?? join(homedir(), '.cache/whisper/ggml-small-q5_1.bin');
 /** Below this share of words heard, the timings are mostly guesses: keep line-level. */
 const MIN_MATCH = 0.35;
@@ -36,8 +37,14 @@ try {
   await run('whisper-cli', ['--help']);
   await access(MODEL);
 } catch {
-  console.error(`Needs whisper-cli on PATH and a model at ${MODEL}. See DEPLOY.md.`);
-  process.exit(1);
+  // In a deploy, a machine without the setup still publishes: new songs just
+  // keep line-level timing. Said loudly, so it is a choice and not an accident.
+  const optional = args.includes('--if-available');
+  console[optional ? 'warn' : 'error'](
+    `\n${optional ? '⚠ Skipping word timing' : '✗ Cannot time words'}: needs whisper-cli on PATH ` +
+      `and a model at ${MODEL}.\n  New songs will highlight line by line. Setup: DEPLOY.md.\n`,
+  );
+  process.exit(optional ? 0 : 1);
 }
 
 await mkdir(OUT, { recursive: true });
@@ -104,4 +111,10 @@ for (const [n, t] of tracks.entries()) {
 await rm(tmp, { recursive: true, force: true });
 console.log(`\n${tally.timed} timed to the word, ${tally.weak} kept line-level, ` +
   `${tally.noLyrics} without synced lyrics, ${tally.cached} already done, ${tally.failed} failed.`);
-if (tally.timed || tally.weak) console.log('Run `npm run songs` to point the manifest at them.');
+
+// Point the manifest at everything now on disk, so the build that follows (or
+// the dev server) picks the new timings up without another `pnpm songs`.
+const all = JSON.parse(await readFile('public/songs.json', 'utf8'));
+const worded = await attachWords(all);
+await writeFile('public/songs.json', JSON.stringify(all));
+console.log(`songs.json: ${worded} of ${all.length} tracks timed to the word.`);

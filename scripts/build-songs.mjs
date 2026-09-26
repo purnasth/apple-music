@@ -1,18 +1,18 @@
 // Indexes public/songs into public/songs.json so the deployed site knows what exists —
 // a static export has no server to list a directory with. Drop audio into
-// public/songs/<folder>/, run `npm run deploy`, and the folder becomes a filter chip.
+// public/songs/<folder>/, run `pnpm run deploy`, and the folder becomes a filter chip.
 //
 // Covers are extracted rather than read from the .m4a in the browser: a deployed track is
 // just a URL, so reaching its embedded art means downloading the file's moov box — 35.9 MB
 // across this library, and a third of the files keep moov at the very end. Extracted and
 // downscaled they are 1.4 MB, served as plain images.
-import { readdir, readFile, mkdir, writeFile, rm, stat } from 'node:fs/promises';
+import { readdir, mkdir, writeFile, rm, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { parseFile } from 'music-metadata';
-import { wordsFile } from './words-key.mjs';
+import { attachWords } from './words-key.mjs';
 
 const run = promisify(execFile);
 const SONGS = 'public/songs';
@@ -129,26 +129,9 @@ for (const file of files) {
 
 tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 
-// Word timings are written by `npm run words` (scripts/align-lyrics.mjs), which is
-// slow, so it is not part of this run: attach whatever it has already written.
-// Versioned by content, so a re-timed file is never served stale from cache.
-// Files for songs that are gone — or whose audio changed, since the key carries
-// the size — are pruned; everything current is left for the next `npm run words`.
-const WORDS = 'public/songs-words';
-await mkdir(WORDS, { recursive: true });
-const wanted = new Set();
-let worded = 0;
-for (const t of tracks) {
-  const name = wordsFile(t.preview);
-  wanted.add(name);
-  const raw = await readFile(join(WORDS, name), 'utf8').catch(() => null);
-  if (!raw || !JSON.parse(raw).lines) continue;
-  t.words = `/songs-words/${name}?v=${createHash('sha1').update(raw).digest('hex').slice(0, 8)}`;
-  worded++;
-}
-for (const name of await readdir(WORDS)) {
-  if (!wanted.has(name)) await rm(join(WORDS, name), { force: true });
-}
+// Word timings come from `pnpm words` (scripts/align-lyrics.mjs), which is slow,
+// so it is not part of this run: attach whatever it has already written.
+const worded = await attachWords(tracks);
 await writeFile('public/songs.json', JSON.stringify(tracks));
 
 // Now that every cover this manifest names is on disk, drop the rest — covers

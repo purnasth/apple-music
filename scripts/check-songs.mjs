@@ -31,7 +31,7 @@ if (!found) {
     `\n✗ No audio in ${SONGS}/ — refusing to build.\n\n` +
       `  Deploying now would replace the live library with nothing.\n\n` +
       `  On CI this build cannot succeed: the audio is not in git. Deploy from a\n` +
-      `  machine that has the songs, with \`npm run deploy\`. See DEPLOY.md.\n`
+      `  machine that has the songs, with \`pnpm run deploy\`. See DEPLOY.md.\n`
   );
   process.exit(1);
 }
