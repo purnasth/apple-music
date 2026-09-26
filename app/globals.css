@@ -291,11 +291,9 @@ nav,
    and transport, on a desktop they sit *beside* both — and a grid can say that
    without the markup having to change shape.
 
-   The toggle animates max-width and the cover's width, which are layout
-   properties the performance rules would normally keep off the animation path.
-   It is allowed here because this fires once on a deliberate tap, not per frame
-   of a gesture, and it is only two elements deep. Anything the user can drag
-   stays on transform and opacity. */
+   Nothing here transitions. Opening and closing the words is a view transition
+   (see the ::view-transition rules below), so no layout property is ever
+   animated: the browser snapshots both states and moves pictures of them. */
 .stage {
   display: grid;
   grid-template-areas: "id" "ctl";
@@ -303,7 +301,6 @@ nav,
   width: 100%;
   max-width: 32rem;
   margin-block: auto;
-  transition: max-width 450ms var(--ease-shift);
 }
 
 .stage[data-lyrics] {
@@ -337,9 +334,7 @@ nav,
   position: relative;
   min-width: 0;
   min-height: 0;
-  /* Glass arriving, not a label fading in: blur and offset resolve together so it
-     reads as a material coming into focus. */
-  animation: lyrics-in 380ms var(--ease-glide) both;
+  view-transition-name: lyrics;
 }
 
 /* Absolutely filling its area, so a hundred lines of song cannot push the grid
@@ -382,9 +377,9 @@ nav,
 .stage-art {
   width: min(46vh, 78vw);
   border-radius: var(--radius-sheet);
-  transition:
-    width 450ms var(--ease-shift),
-    border-radius 450ms var(--ease-shift);
+  /* The one element that travels when the words open or close: a phone's header
+     thumbnail and the full cover are the same object, so it moves as one. */
+  view-transition-name: cover;
 }
 
 .stage-meta {
@@ -401,7 +396,6 @@ nav,
      leading pulled in to match (HIG — typography: both are size-specific). */
   line-height: 1.2;
   letter-spacing: -0.02em;
-  transition: font-size 450ms var(--ease-shift);
 }
 
 /* On a phone with the words up, identity collapses to a row — a thumbnail and a
@@ -454,11 +448,56 @@ nav,
 
 /* ---------- The lyrics column ---------- */
 
+/* ---------- Opening and closing the words: a view transition ----------
+
+   Short, and asymmetric. The words arrive over 300ms with a trace of blur and a
+   6px rise, the way a surface comes into focus; they leave in 150ms with no
+   movement at all, because by then the eye has already moved to the cover. The
+   cover glides between its two sizes on the strong ease-out — fast off the mark,
+   soft landing — and everything else simply crossfades in place rather than
+   flying across the screen. */
+::view-transition-group(*) {
+  animation-duration: 300ms;
+  animation-timing-function: var(--ease-glide);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
+}
+::view-transition-old(cover),
+::view-transition-new(cover) {
+  animation-duration: 300ms;
+  /* The two snapshots are both squares; stretch rather than letterbox. */
+  height: 100%;
+}
+::view-transition-new(lyrics):only-child {
+  animation: lyrics-in 300ms var(--ease-glide) both;
+}
+::view-transition-old(lyrics):only-child {
+  animation: lyrics-out 150ms var(--ease-glide) both;
+}
+
 @keyframes lyrics-in {
   from {
     opacity: 0;
-    filter: blur(10px);
-    translate: 0 1.5rem;
+    filter: blur(6px);
+    translate: 0 6px;
+  }
+}
+@keyframes lyrics-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* A new song's words (or words that were still loading) settle in rather than
+   popping. Opacity only: nothing moves under the reader. */
+.lyrics-body {
+  animation: lyrics-fade 260ms var(--ease-glide) both;
+}
+@keyframes lyrics-fade {
+  from {
+    opacity: 0;
   }
 }
 
@@ -506,13 +545,63 @@ nav,
     scale 420ms var(--ease-glide);
 }
 
-/* Sung, coming, and now. The step from 0.5 to 1 is what the eye locks onto. */
+/* Sung, coming, and now. Coming lines fall off with distance (--d, 1 to 4, set
+   per line), so the next line reads at 0.58 and the ones beyond recede — depth
+   that points the eye at where the song is going. */
 .lyric-line[data-state="soon"] {
-  opacity: 0.5;
+  opacity: calc(0.66 - var(--d, 4) * 0.08);
 }
 .lyric-line[data-state="now"] {
   opacity: 1;
   scale: 1;
+  /* A soft light off the line being sung. A filter rather than text-shadow:
+     with the sweep's background-clip, a text-shadow paints over the fill. */
+  filter: drop-shadow(0 0 0.6em rgb(255 255 255 / 0.18));
+}
+
+/* The sweep. The current line fills with white as it is sung, driven by --p
+   (0 to 1) which the frame loop writes onto this one element. Inline, so a line
+   that wraps fills in reading order: an inline box's background is laid out as
+   if its fragments sat end to end, then sliced — the gradient runs across the
+   first row, then carries on along the second. The 2em ramp is the soft
+   leading edge; the stops are offset by it so 0 is all dim and 1 all lit. */
+.lyric-text {
+  display: inline;
+}
+.lyric-line[data-state="now"] .lyric-text {
+  background-image: linear-gradient(
+    90deg,
+    #fff calc(var(--p, 0) * (100% + 2em) - 2em),
+    rgb(255 255 255 / 0.4) calc(var(--p, 0) * (100% + 2em))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Three dots over an instrumental. Each owns a third of the gap and fills
+   from the same --p; while current, the trio breathes on a slow cycle. */
+.interlude {
+  display: inline-flex;
+  gap: 0.45rem;
+  padding-block: 0.35em;
+  transform-origin: left center;
+}
+.interlude i {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: clamp(0.35, calc(0.35 + (var(--p, 0) * 3 - var(--i)) * 0.65), 1);
+  transition: opacity 200ms linear;
+}
+.lyric-line[data-state="now"] .interlude {
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  50% {
+    scale: 1.14;
+  }
 }
 
 /* Gated: a tap on a touch screen fires a phantom hover that would leave the
@@ -547,5 +636,10 @@ nav,
   .lyric-line,
   .lyric-line:active {
     scale: 1;
+  }
+  /* The blanket rule shrinks durations, which would spin an infinite loop at
+     frame rate — stop it outright instead. */
+  .lyric-line[data-state="now"] .interlude {
+    animation: none;
   }
 }

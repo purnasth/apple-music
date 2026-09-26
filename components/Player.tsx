@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, useEffect, useRef, useState } from "react";
+import { CSSProperties, RefObject, useEffect, useRef, useState } from "react";
 import {
   TbArrowsMaximize,
   TbArrowsShuffle,
@@ -28,7 +28,9 @@ import {
   saveSessionTime,
   shuffled,
 } from "@/lib/music";
-import { Line, Lyrics, getLyrics, lineAt } from "@/lib/lyrics";
+import { getLyrics } from "@/lib/lyrics";
+import LyricsPanel from "./Lyrics";
+import { flushSync } from "react-dom";
 import Image from "next/image";
 
 /** Feeds the styled range its filled (and buffered) proportion; see .range in globals.css. */
@@ -103,6 +105,27 @@ export default function Player({
     });
   };
 
+  /**
+   * Opening and closing the words re-forms the whole view, and animating that as
+   * layout (widths, font sizes) is what made it feel overdone: everything moved
+   * at once, text reflowed mid-flight, and the words just vanished. A view
+   * transition snapshots both states instead: the cover morphs as one composited
+   * layer, the words fade on their own short curve, the rest crossfades. See the
+   * ::view-transition rules in globals.css. Keyboard toggles skip it — a key is
+   * pressed far too often to be made to wait for an animation.
+   */
+  const toggleLyrics = () => {
+    const to = !showLyrics;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (calm || !document.startViewTransition) return setShowLyrics(to);
+    // A transition is skipped, not failed, when the tab is hidden or a second
+    // tap lands mid-flight; the state change still applies. Its `ready`
+    // promise rejects then, and that is expected, not an error.
+    document
+      .startViewTransition(() => flushSync(() => setShowLyrics(to)))
+      .ready.catch(() => {});
+  };
+
   /** The queue comes back with the view, but only where there is room for it. */
   const openFull = (withQueue: boolean) => {
     setShowQueue(withQueue && window.innerWidth >= 1024);
@@ -125,7 +148,9 @@ export default function Player({
     const path = order ?? queue.map((_, i) => i);
     const nxt = queue[path[path.indexOf(index) + 1]];
     if (nxt?.preview?.startsWith("/songs/")) fetch(nxt.preview).catch(() => {});
-  }, [index, order, queue]);
+    // With the words up, the next song's words are one cached promise away too.
+    if (showLyrics && nxt) getLyrics(nxt).catch(() => {});
+  }, [index, order, queue, showLyrics]);
 
   /** Walk the play order, which is the shuffled one when shuffle is on. */
   const step = (delta: 1 | -1) => {
@@ -304,6 +329,10 @@ export default function Player({
         case "Escape":
           if (showLyrics) return setShowLyrics(false);
           return setFull(false);
+        case "KeyY":
+          e.preventDefault();
+          if (!full) openFull(false);
+          return setShowLyrics(!showLyrics);
         case "Space":
         case "KeyK":
           e.preventDefault();
@@ -449,7 +478,8 @@ export default function Player({
           showQueue={showQueue}
           setShowQueue={setShowQueue}
           showLyrics={showLyrics}
-          setShowLyrics={setShowLyrics}
+          toggleLyrics={toggleLyrics}
+          audio={audioRef}
           error={error}
           onClose={() => setFull(false)}
         />
@@ -656,7 +686,8 @@ function FullView({
   showQueue,
   setShowQueue,
   showLyrics,
-  setShowLyrics,
+  toggleLyrics,
+  audio,
   error,
   onClose,
 }: {
@@ -684,7 +715,8 @@ function FullView({
   showQueue: boolean;
   setShowQueue: (s: boolean) => void;
   showLyrics: boolean;
-  setShowLyrics: (s: boolean) => void;
+  toggleLyrics: () => void;
+  audio: RefObject<HTMLAudioElement | null>;
   error: string | null;
   onClose: () => void;
 }) {
@@ -706,7 +738,7 @@ function FullView({
           It deepens for the lyrics, which are long-form reading over a moving
           backdrop rather than a few words — dim to focus. */}
       <div
-        className={`pointer-events-none absolute inset-0 transition-colors duration-500 ease-glide ${
+        className={`pointer-events-none absolute inset-0 transition-colors duration-300 ease-glide ${
           showLyrics ? "bg-black/72" : "bg-black/55"
         }`}
       />
@@ -853,12 +885,7 @@ function FullView({
             </div>
 
             {showLyrics && (
-              <LyricsPanel
-                key={track.id}
-                track={track}
-                time={time}
-                onSeek={onSeek}
-              />
+              <LyricsPanel key={track.id} track={track} audio={audio} />
             )}
 
             <div className="stage-ctl">
@@ -907,11 +934,7 @@ function FullView({
                 <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
                   <TbRepeat size={18} />
                 </Btn>
-                <Btn
-                  onClick={() => setShowLyrics(!showLyrics)}
-                  active={showLyrics}
-                  label="Lyrics"
-                >
+                <Btn onClick={toggleLyrics} active={showLyrics} label="Lyrics">
                   <TbMicrophone2 size={18} />
                 </Btn>
               </div>
@@ -946,187 +969,5 @@ function FullView({
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * The words, following the song. Timed lines light up one at a time and seek when
- * tapped; a sheet with no timings is shown as a sheet and says so.
- *
- * Hierarchy is opacity alone — never weight. Bolding the current line would re-wrap
- * it and shove everything below it sideways on every beat, which is the jitter that
- * makes a lyrics view feel cheap.
- */
-function LyricsPanel({
-  track,
-  time,
-  onSeek,
-}: {
-  track: Track;
-  time: number;
-  onSeek: (t: number) => void;
-}) {
-  const [lyrics, setLyrics] = useState<Lyrics | null | undefined>();
-  const box = useRef<HTMLDivElement>(null);
-  const active = useRef<HTMLButtonElement>(null);
-  /** Set while the listener is scrolling for themselves; following stops until they stop. */
-  const [held, setHeld] = useState(false);
-  const release = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  // Keyed on the track by the parent, so a new song arrives as a fresh panel.
-  useEffect(() => {
-    let gone = false;
-    getLyrics(track)
-      .then((l) => !gone && setLyrics(l))
-      .catch(() => !gone && setLyrics(null));
-    return () => void (gone = true);
-  }, [track]);
-
-  useEffect(() => () => clearTimeout(release.current), []);
-
-  const lines: Line[] | undefined =
-    lyrics && "lines" in lyrics && lyrics.lines.length
-      ? lyrics.lines
-      : undefined;
-  const plain = lyrics && "plain" in lyrics ? lyrics.plain : undefined;
-  // A shade ahead of the clock: the eye reaches a line just before the voice does.
-  const at = lines ? lineAt(lines, time + 0.3) : -1;
-
-  // Follow the song. scrollTo on the panel rather than scrollIntoView, which walks
-  // every scrollable ancestor and would drag the whole view along with the line.
-  // 0.38 keeps the current line a little above centre, so what is coming has room.
-  useEffect(() => {
-    const el = active.current;
-    const view = box.current;
-    if (!el || !view || held) return;
-    view.scrollTo({
-      top: el.offsetTop - view.clientHeight * 0.38,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? "auto"
-        : "smooth",
-    });
-  }, [at, held, lyrics]);
-
-  // Reading ahead has to win over following, or the panel yanks the words away
-  // mid-sentence. Wheel and touch only: the smooth scroll above raises scroll
-  // events of its own, and listening for those would have the panel mistake
-  // itself for the listener and never follow again.
-  const hold = () => {
-    setHeld(true);
-    clearTimeout(release.current);
-    release.current = setTimeout(() => setHeld(false), 4000);
-  };
-
-  const empty = !lines && !plain;
-
-  return (
-    // Two elements, not one: the outer takes its height from the composition, the
-    // inner fills it absolutely and scrolls. See .stage-lyrics in globals.css.
-    <div className="stage-lyrics">
-      <div
-        ref={box}
-        className="stage-lyrics-view"
-        data-empty={empty || undefined}
-        onWheel={hold}
-        onTouchMove={hold}
-      >
-        {lyrics === undefined ? (
-          // Three bars rather than a spinner: it shows the shape of what is coming.
-          <div
-            className="flex w-56 flex-col gap-3"
-            aria-label="Looking for lyrics"
-          >
-            {[100, 72, 86].map((w, i) => (
-              <span
-                key={i}
-                className="h-4 animate-pulse rounded-full bg-white/15"
-                style={{ width: `${w}%`, animationDelay: `${i * 140}ms` }}
-              />
-            ))}
-          </div>
-        ) : empty ? (
-          <p className="max-w-56 text-center text-sm text-white/45">
-            No lyrics found for this song.
-          </p>
-        ) : lines ? (
-          <>
-            <ol>
-              {lines.map((l, i) => (
-                <li key={i}>
-                  <button
-                    ref={i === at ? active : undefined}
-                    onClick={() => onSeek(l.t)}
-                    // No data-state is the sung state; the CSS reads the absence.
-                    data-state={i === at ? "now" : i > at ? "soon" : undefined}
-                    className="lyric-line"
-                    title="Play from here"
-                  >
-                    {l.text || (
-                      <Interlude
-                        from={l.t}
-                        to={lines[i + 1]?.t ?? l.t + 5}
-                        time={time}
-                      />
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ol>
-            <Credit />
-          </>
-        ) : (
-          <>
-            <p className="mb-6 text-xxs font-semibold uppercase tracking-widest text-white/40">
-              Words only · not timed to the song
-            </p>
-            <p className="lyric-plain">{plain}</p>
-            <Credit />
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** Someone transcribed and timed these by hand for nothing. Say so. */
-const Credit = () => (
-  <p className="pt-10 text-xxs text-white/30">Lyrics from LRCLIB</p>
-);
-
-/**
- * The instrumental stretches between sung lines. Three dots filling left to right
- * over the gap say "still playing, still in the right place" — the alternative is a
- * blank column that reads as the panel having lost the song.
- */
-function Interlude({
-  from,
-  to,
-  time,
-}: {
-  from: number;
-  to: number;
-  time: number;
-}) {
-  const done = Math.min(
-    Math.max((time - from) / Math.max(to - from, 0.001), 0),
-    1,
-  );
-  return (
-    <span className="flex items-center gap-2" aria-label="Instrumental">
-      {[0, 1, 2].map((i) => {
-        // Each dot owns a third of the gap and fills within it.
-        const fill = Math.min(Math.max(done * 3 - i, 0), 1);
-        return (
-          <span
-            key={i}
-            className="h-2.5 w-2.5 rounded-full bg-current transition-[opacity,scale] duration-500 ease-glide"
-            style={{
-              opacity: 0.35 + fill * 0.65,
-              scale: `${0.8 + fill * 0.3}`,
-            }}
-          />
-        );
-      })}
-    </span>
   );
 }
