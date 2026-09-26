@@ -4,18 +4,11 @@ import { join } from 'node:path';
 
 export const WORDS = 'public/songs-words';
 
-/** Where a track's word timings live. Keyed on the preview URL, which carries the
-    path and the file size (?v=), so replacing a song's audio re-times it. */
+/** Keyed on the preview URL, which includes the file size, so new audio is re-timed. */
 export const wordsFile = (preview) =>
   `${createHash('sha1').update(preview).digest('hex').slice(0, 16)}.json`;
 
-/**
- * Point each manifest entry at its word timings, if `pnpm words` has written
- * them. Versioned by content, so a re-timed file is never served stale from the
- * service worker's cache. Files for songs that are gone — or whose audio
- * changed, since the key carries the size — are pruned; nothing current is
- * touched. Used by both scripts, so either order leaves songs.json right.
- */
+/** Links manifest entries to their timings (content-versioned) and prunes orphans. */
 export async function attachWords(tracks) {
   await mkdir(WORDS, { recursive: true });
   const wanted = new Set();

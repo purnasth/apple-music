@@ -1,33 +1,12 @@
-/**
- * Word timing by forced alignment — build time only, never shipped to the browser.
- *
- * Inputs are the song's timed lines (human-set, from LRCLIB) and the words a
- * speech model heard in the audio, each with a time. The model's text is often
- * wrong and its clock runs a steady second or so late, but the *spacing* between
- * the words it hears is good. So: line starts come from the lyrics, word spacing
- * comes from the model, and the text on screen is always the real lyric.
- *
- *   1. Pair lyric words with heard words by sequence alignment (Needleman–Wunsch),
- *      fuzzy on spelling and across scripts — a romanised "tujhe" pairs with a
- *      heard "तुझे".
- *   2. Estimate the model's clock offset from those pairs (median, so a few bad
- *      pairs cannot move it), then align again, refusing pairs that land outside
- *      their own line.
- *   3. Place every word: paired words at their corrected time, the rest
- *      interpolated by character position between their neighbours.
- */
+/** Word timing by forced alignment of heard words to LRCLIB lines. Build time only. */
 
 export type Heard = { text: string; t: number };
 export type TimedLine = {
   t: number;
   text: string;
-  /** Start of each space-separated word, seconds. */
   w?: number[];
-  /** When singing stops on this line — the last word's end. */
   e?: number;
 };
-
-/* ---------- comparing words ---------- */
 
 const letters = (s: string) =>
   s
@@ -35,7 +14,6 @@ const letters = (s: string) =>
     .normalize("NFC")
     .replace(/[^\p{L}\p{M}\p{N}]/gu, "");
 
-/** Enough Devanagari → Latin to compare against romanised lyrics, not to read. */
 const DEV: Record<string, string> = {
   अ: "a",
   आ: "aa",
@@ -105,10 +83,7 @@ const translit = (s: string) =>
     ? [...s.normalize("NFD")].map((c) => DEV[c] ?? c).join("")
     : s;
 
-/**
- * The consonant skeleton: how a word sounds with spelling choices removed.
- * "dekhoon", "dekhun" and "देखूँ" all come out as "dkhn".
- */
+/** Consonant skeleton, script-independent: "dekhoon" and "देखूँ" both give "dkhn". */
 export const skeleton = (s: string) =>
   letters(translit(s))
     .replace(/ph/g, "f")
@@ -140,7 +115,6 @@ function lev(a: string, b: string): number {
 const ratio = (a: string, b: string) =>
   a.length || b.length ? 1 - lev(a, b) / Math.max(a.length, b.length) : 0;
 
-/** 0..1, how likely two words are the same word. */
 export function similarity(lyric: string, heard: string): number {
   const a = letters(lyric);
   const b = letters(heard);
@@ -148,19 +122,16 @@ export function similarity(lyric: string, heard: string): number {
   const full = hasDevanagari(a) === hasDevanagari(b) ? ratio(a, b) : 0;
   const sa = skeleton(a);
   const sb = skeleton(b);
-  // Short skeletons ("h", "m") match far too easily to count on their own.
   const skel = sa.length >= 2 && sb.length >= 2 ? ratio(sa, sb) * 0.9 : 0;
   return Math.max(full, skel);
 }
-
-/* ---------- pairing ---------- */
 
 type Slot = { line: number; word: number; text: string };
 
 const MATCH = 0.55;
 const GAP = -0.4;
 
-/** Needleman–Wunsch over the two word sequences. Returns heard index per lyric slot, or -1. */
+/** Needleman–Wunsch; returns the paired heard index per lyric slot, or -1. */
 function pair(
   slots: Slot[],
   heard: Heard[],
@@ -214,16 +185,11 @@ const median = (xs: number[]) => {
   return s.length ? s[s.length >> 1] : 0;
 };
 
-/* ---------- placing ---------- */
-
-/** Chars per second a singer covers; only used where nothing was heard. */
 const PACE = 0.075;
 
 export type Alignment = {
   lines: TimedLine[];
-  /** Share of lyric words the model was actually heard singing. */
   matched: number;
-  /** The model's clock correction, seconds. */
   offset: number;
 };
 
@@ -238,8 +204,6 @@ export function align(
   );
   const end = (line: number) => lines[line + 1]?.t ?? lines[line].t + 8;
 
-  // Pass 1: order alone. Good enough to measure the model's clock offset from
-  // the lines whose first word it heard.
   const loose = pair(slots, heard, () => true);
   const deltas = slots
     .map((s, k) =>
@@ -248,8 +212,6 @@ export function align(
     .filter((d) => !Number.isNaN(d));
   const offset = median(deltas);
 
-  // Pass 2: the same, but a pair must land inside its own line (with a little
-  // slack), which stops a repeated chorus pairing with the wrong repeat.
   const tight = pair(slots, heard, (s, h) => {
     const t = h.t + offset;
     return t >= lines[s.line].t - 0.75 && t <= end(s.line) + 0.75;
@@ -266,9 +228,6 @@ export function align(
     const len = l.text.length;
     const stop = end(i) - 0.05;
 
-    // The model's lag drifts through a song, so where it heard this line's first
-    // word, that measures the lag here exactly; the song-wide median is only the
-    // fallback. A local reading far from the median is a bad pair, not a drift.
     const mine = slots
       .map((s, k) => (s.line === i ? k : -1))
       .filter((k) => k >= 0);
@@ -276,7 +235,6 @@ export function align(
     const local = first >= 0 ? l.t - heard[first].t : NaN;
     const lag = Math.abs(local - offset) < 1 ? local : offset;
 
-    // Anchors: (character position, time). The line's own start is always one.
     const anchors: [number, number][] = [[0, l.t]];
     mine.forEach((k) => {
       const s = slots[k];
@@ -298,7 +256,6 @@ export function align(
       const [p1, t1] = anchors[a + 1];
       return p1 === p0 ? t0 : t0 + ((p - p0) / (p1 - p0)) * (t1 - t0);
     });
-    // Never backwards, never on top of each other.
     for (let k = 1; k < w.length; k++) w[k] = Math.max(w[k], w[k - 1] + 0.04);
     const r = (x: number) => Math.round(x * 100) / 100;
     return {
@@ -318,16 +275,10 @@ export function align(
   };
 }
 
-/* ---------- reading the model's output ---------- */
-
 type WhisperToken = { text: string; t_dtw?: number };
 type WhisperJson = { transcription: { tokens: WhisperToken[] }[] };
 
-/**
- * whisper.cpp's full JSON (-ojf, with --dtw) lists sub-word tokens. A token that
- * starts with a space starts a word; the rest continue it ("don" + "'t").
- * Timestamps are t_dtw, in centiseconds.
- */
+/** Words from whisper.cpp -ojf --dtw output; t_dtw is in centiseconds. */
 export function heardWords(json: WhisperJson): Heard[] {
   const out: Heard[] = [];
   for (const seg of json.transcription)
@@ -343,32 +294,20 @@ export function heardWords(json: WhisperJson): Heard[] {
   return out;
 }
 
-/* ---------- choosing the model's language ---------- */
-
 const ENGLISH = new Set(
   "the a an and or but i me my you your we our he she it they is are was be to of in on at for with not no so all this that what love like up as".split(
     " ",
   ),
 );
-/** The small words romanised Hindi and Nepali lean on, the same way. */
 const ROMANISED = new Set(
   "hai hain main mein tu tum tera teri tere mera meri mere ke ki ka na se ho ye yeh jo dil hoon hun kya nahi hum mujhe tujhe bhi toh ko timi mero ma cha chha ra".split(
     " ",
   ),
 );
 
-/**
- * Which language to tell the model, from the lyric itself. Left to guess, it
- * listens to the intro — often only instruments — and guesses English, or hears
- * Hindi and writes it in Urdu script when the lyric is in Devanagari. Hindi
- * covers Nepali well enough to pair words: the skeleton comparison does the rest.
- * Latin-script lyrics are English or romanised Hindi/Nepali; whichever set of
- * small words turns up more often decides.
- */
+/** The model language, from the lyric: auto-detection misjudges instrumental intros. */
 export function languageOf(lines: { text: string }[]): "en" | "hi" | "ur" {
   const text = lines.map((l) => l.text).join(" ");
-  // Urdu lyrics pair with Urdu heard as written; there is no bridge between the
-  // two scripts here, so the model must write what the lyric is written in.
   if (/[\u0600-\u06FF]/.test(text)) return "ur";
   if (hasDevanagari(text)) return "hi";
   const words = text.toLowerCase().split(/\s+/).map(letters).filter(Boolean);

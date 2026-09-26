@@ -3,14 +3,12 @@ import type { Track } from "./music";
 export type Line = {
   t: number;
   text: string;
-  /** Start of each space-separated word, seconds — present once aligned to the word. */
+  /** Word start times, when timed to the word. */
   w?: number[];
-  /** When singing on this line stops; the last word's end. */
   e?: number;
 };
 
-/** "[mm:ss.xx] words" per line; a line may carry several stamps (a repeated chorus).
-    Enhanced-LRC word stamps ("<mm:ss.xx>word") are stripped rather than shown raw. */
+/** Parses LRC; a line may carry several stamps. Enhanced-LRC word stamps are stripped. */
 export function parseLrc(lrc: string): Line[] {
   const out: Line[] = [];
   for (const raw of lrc.split("\n")) {
@@ -27,8 +25,7 @@ export function parseLrc(lrc: string): Line[] {
   return out.sort((a, b) => a.t - b.t);
 }
 
-/** Index of the line being sung at `time`, or -1 before the first one. Binary
-    search: it runs on every animation frame. */
+/** Index of the line being sung at `time`, or -1 before the first. */
 export function lineAt(lines: Line[], time: number): number {
   let lo = 0;
   let hi = lines.length - 1;
@@ -43,14 +40,8 @@ export function lineAt(lines: Line[], time: number): number {
   return at;
 }
 
-/**
- * How far through line `i` the voice is, 0 to 1, for the sweep that fills the
- * current line. An instrumental gap fills across the whole gap. A sung line
- * fills at singing pace and then holds, because the gap before the next stamp
- * is often part silence and a sweep stretched over it would lag the voice.
- */
-// ponytail: pace heuristic (~13 chars/s); exact only with per-word timings,
-// which LRCLIB rarely has. Parse enhanced-LRC stamps here if that changes.
+/** Progress 0–1 through line `i`, for lines without word timings. */
+// ponytail: ~13 chars/s pace heuristic; exact only with word timings.
 export function progress(lines: Line[], i: number, time: number): number {
   const line = lines[i];
   if (!line) return 0;
@@ -61,12 +52,7 @@ export function progress(lines: Line[], i: number, time: number): number {
   return Math.min(Math.max((time - line.t) / Math.max(span, 0.001), 0), 1);
 }
 
-/**
- * For a line timed to the word: which word is being sung (-1 before the first)
- * and how far through it, 0 to 1. A word fills over the time to the next word,
- * but no slower than a held syllable would, so a pause after a word does not
- * read as the word being stretched across it.
- */
+/** The word being sung (-1 before the first) and progress 0–1 through it. */
 export function wordAt(line: Line, time: number): { k: number; p: number } {
   const w = line.w;
   if (!w?.length || time < w[0]) return { k: -1, p: 0 };
@@ -89,12 +75,9 @@ type LrcRecord = {
   duration?: number;
 };
 
-/* LRCLIB (lrclib.net): community lyrics, no key, CORS on. Synced beats plain,
-   and lyrics inside the file beat LRCLIB's plain text — they came with the song. */
 const cache = new Map<string, Promise<Lyrics | null>>();
 
-/** One lookup per track, shared by every caller — so no abort signal: cancelling
-    for one panel must not hand the next one a rejected promise. */
+/** One cached lookup per track. No abort signal: callers share the promise. */
 export function getLyrics(track: Track): Promise<Lyrics | null> {
   let p = cache.get(track.id);
   if (!p) {
@@ -112,9 +95,7 @@ async function lrclib(path: string, params: Record<string, string>) {
   return res.ok ? ((await res.json()) as LrcRecord | LrcRecord[]) : null;
 }
 
-/** LRCLIB's best timed text for a track, plus the plain text of its exact match.
-    Shared with scripts/align-lyrics.mjs, so the words the aligner times are the
-    words the browser would have shown. */
+/** LRCLIB's best synced lyrics for a track, and the exact match's plain text. */
 export async function findLrc(
   track: Pick<Track, "title" | "artist" | "album" | "duration">,
 ): Promise<{ synced: string | null; plain: string | null }> {
@@ -127,9 +108,7 @@ export async function findLrc(
   })) as LrcRecord | null;
   let hit = exact?.syncedLyrics ? exact : null;
 
-  // The exact match wants artist, album and duration all to agree; a collaboration
-  // credit or a remaster length breaks it. Search on title and lead artist, and
-  // take a synced result whose length is close enough to be the same recording.
+  // The exact match fails on collaboration credits and remaster lengths.
   if (!hit) {
     const found = (await lrclib("search", {
       track_name: track.title,
@@ -148,8 +127,6 @@ export async function findLrc(
 }
 
 async function fetchLyrics(track: Track): Promise<Lyrics | null> {
-  // Timed to the word offline by scripts/align-lyrics.mjs: the most exact
-  // source there is, a static file beside the song, and no LRCLIB round trip.
   if (track.words) {
     const res = await fetch(track.words).catch(() => null);
     const data = res?.ok

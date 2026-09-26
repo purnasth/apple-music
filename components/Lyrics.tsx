@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { TbCurrentLocation } from "react-icons/tb";
+import { TbArrowNarrowDown, TbArrowNarrowUp } from "react-icons/tb";
 import type { Track } from "@/lib/music";
 import {
   Line,
@@ -21,21 +21,10 @@ import {
   wordAt,
 } from "@/lib/lyrics";
 
-/** The eye reaches a line a beat before the voice does. */
+/** Lines light up slightly before they are sung. */
 const LEAD = 0.3;
-/** How long a hand scroll suspends the follow before it picks the song back up. */
 const HOLD_MS = 5000;
 
-/**
- * The words, keeping time with the song.
- *
- * Timing runs on one requestAnimationFrame loop that reads the audio element
- * directly, not on React state: `timeupdate` fires about four times a second,
- * which is a quarter-second of lag on every line change and a re-render of the
- * whole list each tick. Here React renders only when the line changes, and the
- * sweep across the current line is a single CSS variable written onto that one
- * element — nothing else on the page restyles while a line fills.
- */
 export default function LyricsPanel({
   track,
   audio,
@@ -45,15 +34,14 @@ export default function LyricsPanel({
 }) {
   const [lyrics, setLyrics] = useState<Lyrics | null | undefined>();
   const [at, setAt] = useState(-1);
-  /** Set while the listener scrolls for themselves; following waits for them. */
   const [held, setHeld] = useState(false);
+  const [lost, setLost] = useState(false);
+  const [edge, setEdge] = useState<"up" | "down">("down");
   const view = useRef<HTMLDivElement>(null);
   const active = useRef<HTMLButtonElement>(null);
   const release = useRef<ReturnType<typeof setTimeout>>(undefined);
-  /** The first placement is instant: the panel opens on the current line, it does not scroll there. */
   const placed = useRef(false);
 
-  // Keyed on the track by the parent, so a new song arrives as a fresh panel.
   useEffect(() => {
     let gone = false;
     getLyrics(track)
@@ -70,14 +58,7 @@ export default function LyricsPanel({
       : undefined;
   const plain = lyrics && "plain" in lyrics ? lyrics.plain : undefined;
 
-  // The clock. Idle frames cost one property read and a comparison: nothing is
-  // written while paused, or while a word or line holds full through a silence.
-  //
-  // Two modes. A line timed to the word (lines[i].w, from the offline aligner)
-  // marks each word sung, current or coming as the voice reaches it, and fills
-  // the current word. A line timed only at its start fills as a whole, paced by
-  // a heuristic. Either way the only writes are attributes and one variable on
-  // the element concerned; React is not involved.
+  // rAF instead of timeupdate (~4 Hz); writes go straight to the DOM, not React.
   useEffect(() => {
     if (!lines) return;
     let raf = 0;
@@ -125,13 +106,15 @@ export default function LyricsPanel({
     return () => cancelAnimationFrame(raf);
   }, [lines, audio]);
 
-  // Follow the song. scrollTo on the panel, not scrollIntoView, which walks every
-  // scrollable ancestor and would drag the whole view along with the line. 0.38
-  // keeps the current line a little above centre, so what is coming has room.
+  // scrollTo, not scrollIntoView, which would also scroll every ancestor.
   useEffect(() => {
     const el = active.current;
     const box = view.current;
-    if (!el || !box || held) return;
+    if (!el || !box) return;
+    if (held) {
+      const r = requestAnimationFrame(measure);
+      return () => cancelAnimationFrame(r);
+    }
     const instant =
       !placed.current ||
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -142,9 +125,7 @@ export default function LyricsPanel({
     });
   }, [at, held]);
 
-  // Reading ahead has to win over following. Wheel and touch only: the smooth
-  // scroll above raises scroll events of its own, and listening for those would
-  // have the panel mistake itself for the listener.
+  // Wheel and touch only: our own smooth scroll fires scroll events too.
   const hold = () => {
     setHeld(true);
     clearTimeout(release.current);
@@ -155,11 +136,23 @@ export default function LyricsPanel({
     setHeld(false);
   }, []);
 
+  // The column's top 12% and bottom 18% are masked, so a line there counts as out of view.
+  function measure() {
+    const el = active.current;
+    const box = view.current;
+    if (!el || !box) return setLost(false);
+    const top = el.offsetTop - box.scrollTop;
+    const up = top + el.offsetHeight < box.clientHeight * 0.12;
+    const down = top > box.clientHeight * 0.82;
+    setLost(up || down);
+    if (up || down) setEdge(up ? "up" : "down");
+  }
+
+  const away = held && lost;
+
   const empty = !lines && !plain;
 
   return (
-    // Two elements, not one: the outer takes its height from the composition,
-    // the inner fills it absolutely and scrolls. See .stage-lyrics in globals.css.
     <div className="stage-lyrics">
       <div
         ref={view}
@@ -167,9 +160,9 @@ export default function LyricsPanel({
         data-empty={empty || undefined}
         onWheel={hold}
         onTouchMove={hold}
+        onScroll={held ? measure : undefined}
       >
         {lyrics === undefined ? (
-          // Three bars rather than a spinner: it shows the shape of what is coming.
           <div
             className="flex w-56 flex-col gap-3"
             aria-label="Looking for lyrics"
@@ -195,7 +188,6 @@ export default function LyricsPanel({
               active={active}
               onPick={resume}
             />
-            <Credit />
           </div>
         ) : (
           <div className="lyrics-body">
@@ -203,34 +195,34 @@ export default function LyricsPanel({
               Words only · not timed to the song
             </p>
             <p className="lyric-plain">{plain}</p>
-            <Credit />
           </div>
         )}
       </div>
 
-      {/* Scrolling away is reading, not leaving: a way back is one tap, and it
-          comes back on its own after a few seconds either way. */}
       {lines && (
         <button
           onClick={resume}
-          data-shown={held || undefined}
-          tabIndex={held ? 0 : -1}
-          aria-hidden={!held}
-          className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 translate-y-2 items-center gap-1.5 rounded-full bg-white/15 px-3.5 py-2 text-xs font-medium text-white opacity-0 shadow-lg shadow-black/30 backdrop-blur-xl transition-[opacity,translate] duration-200 ease-glide hover:bg-white/25 active:scale-[0.97] data-[shown]:pointer-events-auto data-[shown]:translate-y-0 data-[shown]:opacity-100"
+          data-shown={away || undefined}
+          tabIndex={away ? 0 : -1}
+          aria-hidden={!away}
+          aria-label={`Back to the current line, ${edge === "up" ? "above" : "below"}`}
+          className={`pointer-events-none absolute left-0 flex items-center gap-1.5 rounded-full bg-elevated-2/95 py-1.5 pl-2.5 pr-3.5 text-xs font-medium text-white opacity-0 shadow-lg shadow-black/40 ring-1 ring-white/10 transition-[opacity,translate] duration-200 ease-glide hover:bg-elevated-2 active:scale-[0.97] data-[shown]:pointer-events-auto data-[shown]:translate-y-0 data-[shown]:opacity-100 ${
+            edge === "up" ? "top-2 -translate-y-2" : "bottom-2 translate-y-2"
+          }`}
         >
-          <TbCurrentLocation size={14} />
-          Back to current line
+          {edge === "up" ? (
+            <TbArrowNarrowUp size={15} />
+          ) : (
+            <TbArrowNarrowDown size={15} />
+          )}
+          Current line
         </button>
       )}
     </div>
   );
 }
 
-/**
- * The line list. Memoised on the line index, so the frame loop above never
- * re-renders it: only a new line does. Depth falls off with distance from the
- * current line (--d), so the eye lands on now and the next line or two.
- */
+/** Memoised on `at`, so the frame loop never re-renders the list. */
 const Lines = memo(function Lines({
   lines,
   at,
@@ -252,7 +244,6 @@ const Lines = memo(function Lines({
           <li key={i}>
             <button
               ref={i === at ? active : undefined}
-              // No data-state is the sung state; the CSS reads the absence.
               data-state={state}
               style={
                 state === "soon"
@@ -269,8 +260,7 @@ const Lines = memo(function Lines({
               {!l.text ? (
                 <Interlude />
               ) : l.w ? (
-                // One span per word, split exactly as the aligner split them,
-                // with the spaces left as plain text so the line wraps as prose.
+                // Split exactly as the aligner did, so w[k] matches span k.
                 l.text.split(" ").map((w, k) => (
                   <Fragment key={k}>
                     {k > 0 && " "}
@@ -288,20 +278,10 @@ const Lines = memo(function Lines({
   );
 });
 
-/**
- * An instrumental stretch. The dots fill from the same --p the sweep uses, and
- * breathe while current, so a quiet passage reads as "still playing, still in
- * the right place" rather than as the panel having lost the song.
- */
 const Interlude = () => (
   <span className="interlude" aria-label="Instrumental">
     {[0, 1, 2].map((i) => (
       <i key={i} style={{ "--i": i } as CSSProperties} />
     ))}
   </span>
-);
-
-/** Someone transcribed and timed these by hand for nothing. Say so. */
-const Credit = () => (
-  <p className="pt-10 text-xxs text-white/30">Lyrics from LRCLIB</p>
 );

@@ -71,17 +71,13 @@ export default function Player({
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
-  /** The listener's choice: words up or not. Survives songs that have none. */
   const [showLyrics, setShowLyrics] = useState(false);
-  /** Id of the current song once it is known to have no lyrics at all. */
   const [noLyrics, setNoLyrics] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
   const lyricsless = !!track && noLyrics === track.id;
-  // What is on screen. A song without lyrics shows the cover even with the
-  // words switched on, and the next song that has them brings them back.
   const lyricsOn = showLyrics && !lyricsless;
 
   /**
@@ -112,32 +108,16 @@ export default function Player({
     });
   };
 
-  /**
-   * Opening and closing the words re-forms the whole view, and animating that as
-   * layout (widths, font sizes) is what made it feel overdone: everything moved
-   * at once, text reflowed mid-flight, and the words just vanished. A view
-   * transition snapshots both states instead: the cover morphs as one composited
-   * layer, the words fade on their own short curve, the rest crossfades. See the
-   * ::view-transition rules in globals.css. Keyboard toggles skip it — a key is
-   * pressed far too often to be made to wait for an animation.
-   */
   const transition = (change: () => void) => {
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (calm || !document.startViewTransition) return change();
-    // A transition is skipped, not failed, when the tab is hidden or a second
-    // tap lands mid-flight; the state change still applies. Its `ready`
-    // promise rejects then, and that is expected, not an error.
+    // `ready` rejects when the transition is skipped (hidden tab, rapid toggle).
     document.startViewTransition(() => flushSync(change)).ready.catch(() => {});
   };
   const toggleLyrics = () => {
     if (!lyricsless) transition(() => setShowLyrics(!showLyrics));
   };
 
-  // Does this song have lyrics at all? Asked as soon as the full view — the only
-  // place with a lyrics button — is open, so the button can say "none" before
-  // anyone presses it, rather than opening onto an empty panel. It is the same
-  // cached lookup the panel makes, so opening the words afterwards is instant.
-  // A failed lookup (offline) proves nothing, so it leaves the button alone.
   useEffect(() => {
     if (!track || !full) return;
     let gone = false;
@@ -145,8 +125,6 @@ export default function Player({
       .then((l) => {
         if (gone || l) return;
         const mark = () => setNoLyrics(track.id);
-        // Words already up for a song that turns out to have none: step back
-        // to the cover the same way closing them does, not with a jump.
         if (document.querySelector(".stage[data-lyrics]")) transition(mark);
         else mark();
       })
@@ -177,7 +155,6 @@ export default function Player({
     const path = order ?? queue.map((_, i) => i);
     const nxt = queue[path[path.indexOf(index) + 1]];
     if (nxt?.preview?.startsWith("/songs/")) fetch(nxt.preview).catch(() => {});
-    // With the words up, the next song's words are one cached promise away too.
     if (showLyrics && nxt) getLyrics(nxt).catch(() => {});
   }, [index, order, queue, showLyrics]);
 
@@ -353,15 +330,11 @@ export default function Player({
       }
 
       switch (e.code) {
-        // Steps down one layer at a time, the way F does, rather than throwing
-        // away the whole view when all you wanted was the words gone.
         case "Escape":
           if (lyricsOn) return setShowLyrics(false);
           return setFull(false);
         case "KeyY":
           e.preventDefault();
-          // The button says this by being dimmed; a key press has nothing to
-          // look at, so it gets told.
           if (lyricsless)
             return void toast("No lyrics for this song", { id: "lyrics" });
           if (!full) openFull(false);
@@ -670,12 +643,7 @@ export default function Player({
   );
 }
 
-/**
- * `unavailable` dims the button and says why, rather than removing it: a control
- * that vanishes on some songs moves its neighbours and leaves people hunting for
- * it. aria-disabled rather than disabled, so it stays focusable and hoverable and
- * the reason in its tooltip can actually be read.
- */
+/** `unavailable` uses aria-disabled so the reason in the tooltip stays reachable. */
 function Btn({
   onClick,
   children,
@@ -783,9 +751,7 @@ function FullView({
         />
       )}
       {/* The Clear variant floats over media; artwork can be bright, so it gets a
-          dimming layer to keep the controls legible (HIG — Liquid Glass > Clear).
-          It deepens for the lyrics, which are long-form reading over a moving
-          backdrop rather than a few words — dim to focus. */}
+          dimming layer to keep the controls legible (HIG — Liquid Glass > Clear). */}
       <div
         className={`pointer-events-none absolute inset-0 transition-colors duration-300 ease-glide ${
           showLyrics ? "bg-black/72" : "bg-black/55"
@@ -887,18 +853,10 @@ function FullView({
         </button>
 
         <div
-          // pt-16 with the words up: on a phone the identity row becomes the
-          // header, and it has to start below the queue and close buttons
-          // floating at top-5 rather than underneath them.
           className={`flex min-w-0 flex-1 flex-col items-center px-4 pb-10 transition-transform duration-300 ease-out sm:px-6 sm:pb-16 sm:pt-16 ${
             showLyrics ? "overflow-hidden pt-16" : "overflow-y-auto pt-10"
           } ${showQueue ? "lg:translate-x-40" : "translate-x-0"}`}
         >
-          {/* Three blocks, laid out by .stage in globals.css: identity, the words,
-              the transport. Opening the lyrics re-forms the composition rather
-              than hiding half of it — on a phone the cover shrinks to a thumbnail
-              beside the title, on a desktop it keeps its column and the words take
-              the one beside it. */}
           <div className="stage" data-lyrics={showLyrics || undefined}>
             <div className="stage-id">
               {art ? (

@@ -14,9 +14,9 @@ export type Track = {
   duration?: number;
   /** Immediate parent folder when imported via the folder picker (new, OG, temp…). */
   folder?: string;
-  /** Plain lyrics the file carried, written out by the indexer; fetched when the panel opens. */
+  /** Plain lyrics embedded in the file. */
   lyrics?: string;
-  /** Lyrics timed to the word by scripts/align-lyrics.mjs, when that has run. */
+  /** Word timings from `pnpm words`. */
   words?: string;
 };
 

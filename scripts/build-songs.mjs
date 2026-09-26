@@ -31,10 +31,7 @@ const walk = async (dir) => {
   return out;
 };
 
-// Deliberately not wiping ART first. It used to, and an interrupted run then
-// left songs.json — written at the very end — pointing at covers that had just
-// been deleted, so most of the library rendered 404s. Write the new set over
-// the old, then prune what is no longer referenced once it is safely on disk.
+// Never wipe ART up front: an interrupted run would leave songs.json pointing at deleted covers.
 await mkdir(ART, { recursive: true });
 await mkdir(LYRICS, { recursive: true });
 
@@ -42,7 +39,6 @@ const files = (await walk(SONGS)).sort();
 const tracks = [];
 /** hash -> whether its two sizes are actually on disk. */
 const covers = new Map();
-/** Lyrics files written this run, so the prune below keeps them. */
 const lyricsKeep = new Set();
 const failed = [];
 
@@ -61,9 +57,7 @@ for (const file of files) {
     if (common.album) album = common.album;
     duration = format.duration;
     pic = common.picture?.[0];
-    // Apple Music downloads carry the words as plain text (never timed); kept as
-    // their own file so a queue saved to localStorage does not carry a lyric sheet
-    // per track. Timed lyrics come from LRCLIB at play time — see lib/lyrics.ts.
+    // Kept as separate files so saved queues do not carry lyric text.
     const l = common.lyrics?.[0];
     words = (typeof l === 'string' ? l : l?.text)?.trim();
   } catch {
@@ -86,16 +80,12 @@ for (const file of files) {
         }
         covers.set(hash, true);
       } catch (e) {
-        // Its own failure, separate from the tags: a cover that will not convert
-        // must not cost the track its title and artist as well.
         covers.set(hash, false);
         failed.push(`${title} — ${String(e.message ?? e).split('\n')[0]}`);
       } finally {
         await rm(raw, { force: true });
       }
     }
-    // Only point at a file that exists. Naming it before the conversion is what
-    // turned a sips failure into a 404 that nothing reported.
     if (covers.get(hash)) {
       artwork = `/songs-art/${hash}.jpg`;
       artworkLarge = `/songs-art/${hash}-lg.jpg`;
@@ -129,13 +119,10 @@ for (const file of files) {
 
 tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 
-// Word timings come from `pnpm words` (scripts/align-lyrics.mjs), which is slow,
-// so it is not part of this run: attach whatever it has already written.
 const worded = await attachWords(tracks);
 await writeFile('public/songs.json', JSON.stringify(tracks));
 
-// Now that every cover this manifest names is on disk, drop the rest — covers
-// of songs since removed, and any .raw- scratch file a killed run left behind.
+// Prune only now that every referenced cover is on disk.
 const written = [...covers].filter(([, ok]) => ok).map(([h]) => h);
 const names = written.flatMap((h) => [`${h}.jpg`, `${h}-lg.jpg`]);
 const keep = new Set(names);
