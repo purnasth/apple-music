@@ -81,9 +81,14 @@ for (const [n, t] of tracks.entries()) {
     const wav = join(tmp, 'a.wav');
     await run('afconvert', ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', src, wav]);
     // -nfa: DTW timestamps are off when flash attention is on.
-    const hear = async (extra) => {
-      await run('whisper-cli', ['-m', MODEL, '-f', wav, '-l', lang, '-ot', String(from), '-ojf',
-        '-of', join(tmp, 'a'), '--dtw', 'small', '-nfa', '-np', ...extra], { maxBuffer: 64 << 20 });
+    // -mc 0: decode each window without the text before it as context. With
+    // context, whisper.cpp aborted outright (exit 134) on three songs here,
+    // every time; without it they all ran, and match rates were identical on
+    // every song compared.
+    const hear = async (extra, language = lang) => {
+      await run('whisper-cli', ['-m', MODEL, '-f', wav, '-l', language, '-ot', String(from), '-ojf',
+        '-of', join(tmp, 'a'), '--dtw', 'small', '-nfa', '-np', '-mc', '0', ...extra],
+        { maxBuffer: 64 << 20 });
       return align(lines, heardWords(JSON.parse(await readFile(join(tmp, 'a.json'), 'utf8'))));
     };
     // Quick pass first: -nf turns off the model's retry-at-higher-temperature,
@@ -91,9 +96,20 @@ for (const [n, t] of tracks.entries()) {
     // loop) and which costs five times the time. Only a weak quick pass pays for
     // the full decode, and the better of the two is kept.
     let r = await hear(['-nf']);
+    let used = lang;
     if (r.matched < GOOD_ENOUGH) {
       const full = await hear([]);
       if (full.matched > r.matched) r = full;
+    }
+    // Latin script is ambiguous between English and romanised Hindi/Nepali, and
+    // bilingual songs exist, so a weak result gets one try in the other.
+    if (r.matched < GOOD_ENOUGH && (lang === 'en' || lang === 'hi') && !/[\u0900-\u097F]/.test(synced)) {
+      const other = lang === 'en' ? 'hi' : 'en';
+      const alt = await hear(['-nf'], other);
+      if (alt.matched > r.matched) {
+        r = alt;
+        used = other;
+      }
     }
     const good = r.matched >= MIN_MATCH;
     await writeFile(out, JSON.stringify(good
@@ -101,7 +117,7 @@ for (const [n, t] of tracks.entries()) {
       : { lines: null, why: 'too little heard', matched: +r.matched.toFixed(2) }));
     if (good) tally.timed++;
     else tally.weak++;
-    console.log(`${label}: ${Math.round(r.matched * 100)}% heard (${lang})${good ? '' : ' — kept line-level'}`);
+    console.log(`${label}: ${Math.round(r.matched * 100)}% heard (${used})${good ? '' : ' — kept line-level'}`);
   } catch (e) {
     tally.failed++;
     console.warn(`${label}: failed — ${String(e.message ?? e).split('\n')[0]}`);

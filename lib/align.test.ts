@@ -79,6 +79,15 @@ test("languageOf reads the lyric, not the intro", () => {
     ]),
     "hi",
   );
+  // English that is light on the commonest words still reads as English.
+  assert.equal(
+    languageOf([
+      {
+        text: "Like a firefly Up in the night Alive and bright Chasing all shadows",
+      },
+    ]),
+    "en",
+  );
   assert.equal(
     languageOf([{ text: "बिस्तारै, बिस्तारै तिमी मेरो वरिपरि" }]),
     "hi",

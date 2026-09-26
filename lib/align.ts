@@ -346,7 +346,13 @@ export function heardWords(json: WhisperJson): Heard[] {
 /* ---------- choosing the model's language ---------- */
 
 const ENGLISH = new Set(
-  "the a an and or but i me my you your we our he she it they is are was be to of in on at for with not no so all this that what love".split(
+  "the a an and or but i me my you your we our he she it they is are was be to of in on at for with not no so all this that what love like up as".split(
+    " ",
+  ),
+);
+/** The small words romanised Hindi and Nepali lean on, the same way. */
+const ROMANISED = new Set(
+  "hai hain main mein tu tum tera teri tere mera meri mere ke ki ka na se ho ye yeh jo dil hoon hun kya nahi hum mujhe tujhe bhi toh ko timi mero ma cha chha ra".split(
     " ",
   ),
 );
@@ -356,6 +362,8 @@ const ENGLISH = new Set(
  * listens to the intro — often only instruments — and guesses English, or hears
  * Hindi and writes it in Urdu script when the lyric is in Devanagari. Hindi
  * covers Nepali well enough to pair words: the skeleton comparison does the rest.
+ * Latin-script lyrics are English or romanised Hindi/Nepali; whichever set of
+ * small words turns up more often decides.
  */
 export function languageOf(lines: { text: string }[]): "en" | "hi" | "ur" {
   const text = lines.map((l) => l.text).join(" ");
@@ -363,9 +371,8 @@ export function languageOf(lines: { text: string }[]): "en" | "hi" | "ur" {
   // two scripts here, so the model must write what the lyric is written in.
   if (/[\u0600-\u06FF]/.test(text)) return "ur";
   if (hasDevanagari(text)) return "hi";
-  const words = letters(text)
-    ? text.toLowerCase().split(/\s+/).map(letters).filter(Boolean)
-    : [];
-  const common = words.filter((w) => ENGLISH.has(w)).length;
-  return words.length && common / words.length >= 0.2 ? "en" : "hi";
+  const words = text.toLowerCase().split(/\s+/).map(letters).filter(Boolean);
+  const en = words.filter((w) => ENGLISH.has(w)).length;
+  const hi = words.filter((w) => ROMANISED.has(w)).length;
+  return en >= hi ? "en" : "hi";
 }
