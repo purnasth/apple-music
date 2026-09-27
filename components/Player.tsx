@@ -412,7 +412,7 @@ export default function Player({
 
   // The bindings YouTube, Spotify and Apple Music agree on, and YouTube's where
   // they differ — see lib/shortcuts.ts for the list this implements. They work
-  // wherever a track is loaded, not only in the full view.
+  // wherever a track is loaded, not only in the full view, and in the mini player.
   //
   // The full view is deliberately not the Fullscreen API: it fills the page, it
   // does not take over the browser chrome, so Escape is handled here.
@@ -447,6 +447,7 @@ export default function Player({
 
       switch (e.code) {
         case "Escape":
+          if (pip && el?.ownerDocument === pip.document) return pip.close();
           if (full && lyricsOn) return setShowLyrics(false);
           return setFull(false);
         case "KeyY":
@@ -462,17 +463,22 @@ export default function Player({
         case "KeyK":
           e.preventDefault();
           return setPlaying(!playing);
-        // I is the plain full view; F drives towards the immersive one, dropping
-        // the queue on the way and leaving altogether once there is nothing left
-        // to drop.
         case "KeyI":
           e.preventDefault();
-          return full ? setFull(false) : openFull(true);
+          if (pip) return pip.close();
+          if (!pipApi())
+            return void toast("The mini player needs Chrome or Edge", {
+              id: "mini",
+            });
+          return void openMiniPlayer().catch(() => {});
         case "KeyF":
           e.preventDefault();
-          if (!full) return openFull(false);
-          if (showQueue) return setShowQueue(false);
-          return setFull(false);
+          return full ? setFull(false) : openFull(false);
+        case "KeyQ":
+          e.preventDefault();
+          if (full) return setShowQueue(!showQueue);
+          setShowQueue(true);
+          return setFull(true);
         case "KeyN":
           if (!e.shiftKey) return;
           e.preventDefault();
@@ -517,9 +523,15 @@ export default function Player({
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // The mini player is its own window, so it needs its own listener.
+    pip?.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      pip?.removeEventListener("keydown", onKey);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    pip,
     full,
     showQueue,
     showLyrics,
@@ -788,7 +800,7 @@ export default function Player({
                   <Btn
                     onClick={() => void openMiniPlayer().catch(() => {})}
                     active={!!pip}
-                    label="Mini player"
+                    label="Mini player (I)"
                   >
                     <TbPictureInPicture />
                   </Btn>
@@ -1943,9 +1955,9 @@ function FullView({
             half the handle's own, which is what centres it on the seam. */}
         <button
           onClick={() => setShowQueue(!showQueue)}
-          aria-label={showQueue ? "Hide queue" : "Show queue"}
+          aria-label={showQueue ? "Hide queue (Q)" : "Show queue (Q)"}
           aria-expanded={showQueue}
-          title={showQueue ? "Hide queue" : "Show queue"}
+          title={showQueue ? "Hide queue (Q)" : "Show queue (Q)"}
           className={`absolute left-0 top-5 z-30 grid h-8 w-8 place-items-center rounded-full bg-white/15 backdrop-blur-xl transition-transform duration-300 ease-out hover:bg-white/25 ${
             showQueue
               ? "translate-x-[calc(min(20rem,85vw)-50%)]"
@@ -2029,9 +2041,9 @@ function FullView({
                   {onMini && (
                     <button
                       onClick={onMini}
-                      aria-label="Mini player"
+                      aria-label="Mini player (I)"
                       aria-pressed={mini}
-                      title="Mini player"
+                      title="Mini player (I)"
                       className={`grid h-9 w-9 place-items-center rounded-full backdrop-blur-xl transition hover:bg-white/25 active:scale-95 ${
                         mini ? "bg-white/30" : "bg-white/15"
                       }`}
