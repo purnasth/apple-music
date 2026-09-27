@@ -137,6 +137,24 @@ export default function Home() {
         setQueue(current(s.queue, lib));
         setQIndex(Math.min(s.index, s.queue.length - 1));
       }
+      // A shared song: #s=<one-track code>. It takes over the player, paused,
+      // and leaves the URL so a reload does not take it over again.
+      if (location.hash.startsWith("#s=")) {
+        const song = (await decodePlaylist(location.hash.slice(3), lib))?.tracks[0];
+        history.replaceState(null, "", location.pathname + location.search);
+        if (!song)
+          return toast.error("That shared link could not be read", {
+            id: "shared-link",
+            description: "It may have been cut short on its way here.",
+          });
+        setQueue([song]);
+        setQIndex(0);
+        return toast.info(`“${song.title}” was shared with you`, {
+          id: "shared-link",
+          description: song.artist,
+          action: { label: "Play", onClick: () => setPlaying(true) },
+        });
+      }
       // A shared link: #p=<gzipped playlist>. The library has to be in hand
       // first, since bundled tracks travel as bare ids.
       const code = location.hash.startsWith("#p=") ? location.hash.slice(3) : "";
@@ -1165,6 +1183,25 @@ export default function Home() {
         setIndex={jumpTo}
         playing={playing}
         setPlaying={setPlaying}
+        onAddTo={setAddTo}
+        onGoTo={(kind, name) => {
+          const needle = name.toLowerCase();
+          const inLib = library.some((t) =>
+            kind === "album"
+              ? t.album.toLowerCase() === needle
+              : artistsOf(t.artist).some((a) => a.toLowerCase() === needle),
+          );
+          if (!inLib) {
+            setTab("search");
+            setQuery(name);
+          } else {
+            setTab("library");
+            setFolder(null);
+            setArtist(kind === "artist" ? name : "");
+            setFilter(kind === "album" ? name : "");
+          }
+          window.scrollTo({ top: 0 });
+        }}
       />
 
       {/* Primary navigation lives at the foot of the screen on a phone, where a thumb

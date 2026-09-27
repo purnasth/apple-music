@@ -37,6 +37,20 @@ test('artistsOf splits collaborations but not hyphenated or plus-joined acts', (
   assert.deepEqual(artistsOf(''), []);
 });
 
+test('artistsOf drops a joined act already credited member by member', () => {
+  assert.deepEqual(artistsOf('Garvit - Priyansh, Garvit Soni & Priyansh Srivastava'), [
+    'Garvit Soni',
+    'Priyansh Srivastava',
+  ]);
+  assert.deepEqual(artistsOf('Sachin-Jigar, Sachin Sanghvi & Jigar Saraiya'), [
+    'Sachin Sanghvi',
+    'Jigar Saraiya',
+  ]);
+  // Only one member credited alone: the act stays.
+  assert.deepEqual(artistsOf('Sachin-Jigar & Arijit Singh'), ['Sachin-Jigar', 'Arijit Singh']);
+  assert.deepEqual(artistsOf('Arijit Singh, arijit singh'), ['Arijit Singh']);
+});
+
 test('shuffled is a permutation, never a resample', () => {
   const src = Array.from({ length: 200 }, (_, i) => i);
   for (let run = 0; run < 20; run++) {

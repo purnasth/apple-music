@@ -117,7 +117,8 @@ input[type="radio"] {
 
 button:disabled,
 select:disabled,
-input:disabled {
+input:disabled,
+[aria-disabled="true"] {
   cursor: not-allowed;
 }
 
@@ -175,6 +176,9 @@ nav,
 /* Light variant for the full view, where the control sits over artwork. */
 .range-light {
   --range-fill: #fff;
+}
+.range-light:hover {
+  --range-fill: var(--color-accent);
 }
 
 /* Thickens under the pointer, the way a scrubbable timeline invites the grab. */
@@ -283,7 +287,7 @@ nav,
   grid-template-areas: "id" "ctl";
   justify-items: center;
   width: 100%;
-  max-width: 32rem;
+  max-width: 36rem;
   margin-block: auto;
 }
 
@@ -298,9 +302,9 @@ nav,
 
 @media (width >= 64rem) {
   .stage[data-lyrics] {
-    max-width: 68rem;
+    max-width: 78rem;
     grid-template-areas: "id lyr" "ctl lyr";
-    grid-template-columns: 21rem minmax(0, 1fr);
+    grid-template-columns: min(30rem, calc(100dvh - 22rem)) minmax(0, 1fr);
     grid-template-rows: auto auto;
     align-content: center;
     column-gap: 4.5rem;
@@ -353,21 +357,198 @@ nav,
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
 }
 
+.horizon-band {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  overflow: hidden;
+  mask-image: linear-gradient(to right, transparent, #000 15%, #000 85%, transparent);
+}
+/* The inset leaves the glow room; the band would clip it. */
+.horizon-line {
+  position: absolute;
+  inset: calc(10px * var(--k)) 0;
+  opacity: 0.12;
+  filter: drop-shadow(0 0 calc(3px * var(--k)) var(--glow));
+  transition: opacity 900ms var(--ease-glide);
+}
+.horizon path {
+  fill: none;
+  stroke-width: calc(1.5px * var(--k));
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.horizon svg {
+  animation: horizon-flow var(--flow-time) linear infinite paused;
+}
+.horizon[data-playing] svg {
+  animation-play-state: running;
+}
+.horizon[data-playing] .horizon-line {
+  animation: horizon-breathe 3.2s ease-in-out infinite alternate;
+}
+.horizon-shine {
+  opacity: 0;
+  filter: none;
+  mask-image: linear-gradient(to right, transparent, #000 50%, transparent);
+  mask-size: 30% 100%;
+  mask-repeat: no-repeat;
+}
+.horizon-shine path {
+  stroke: #fff;
+}
+.horizon[data-playing] .horizon-shine {
+  opacity: 0.45;
+  animation: horizon-shine 6s ease-in-out infinite;
+}
+/* Script draws the live line, so the flow animation must stop. */
+.horizon[data-reactive] svg {
+  animation: none;
+}
+.horizon[data-reactive][data-playing] .horizon-line {
+  animation: none;
+  transition: opacity 80ms linear;
+  opacity: calc(0.5 + var(--pulse, 0) * 0.3);
+  filter: drop-shadow(
+    0 0 calc((3px + var(--pulse, 0) * 7px) * var(--k)) var(--glow)
+  );
+}
+.horizon[data-reactive][data-playing] .horizon-shine {
+  opacity: calc(0.25 + var(--bright, 0) * 0.4);
+  filter: none;
+  animation: horizon-shine 6s ease-in-out infinite;
+}
+@keyframes horizon-flow {
+  to {
+    translate: var(--period) 0;
+  }
+}
+@keyframes horizon-breathe {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0.55;
+  }
+}
+@keyframes horizon-shine {
+  from {
+    mask-position: -60% 0;
+  }
+  to {
+    mask-position: 160% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .horizon svg,
+  .horizon[data-playing] .horizon-line,
+  .horizon[data-playing] .horizon-shine {
+    animation: none;
+  }
+  .horizon[data-playing] .horizon-line {
+    opacity: 0.45;
+  }
+  .horizon-shine {
+    display: none;
+  }
+}
+
+/* Long titles loop leftwards the way Apple Music and Spotify scroll them: a
+   pause, then a steady drift until the trailing copy lands where the first
+   began, so the jump back to the start is invisible. The left fade only shows
+   while moving, so the first letter is never masked at rest. */
+@property --fade-l {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+.marquee {
+  display: block;
+  width: min(100%, 22rem);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.marquee > span {
+  display: inline-block;
+}
+.marquee > span + span {
+  margin-left: var(--gap);
+}
+.marquee[data-overflow] {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--fade-l),
+    #000 calc(100% - 1rem),
+    transparent
+  );
+  animation: marquee-fade var(--marquee-time) linear 1s infinite;
+}
+.marquee[data-overflow] > span {
+  animation: marquee var(--marquee-time) linear 1s infinite;
+}
+@keyframes marquee {
+  0%,
+  20% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(var(--shift));
+  }
+}
+@keyframes marquee-fade {
+  0%,
+  20%,
+  100% {
+    --fade-l: 0px;
+  }
+  24%,
+  96% {
+    --fade-l: 1rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee[data-overflow],
+  .marquee[data-overflow] > span {
+    animation: none;
+  }
+}
+
 .stage-art {
-  width: min(46vh, 78vw);
+  width: min(calc(100dvh - 24rem), 88vw, 36rem);
   border-radius: var(--radius-sheet);
   view-transition-name: cover;
 }
 
+/* Paused, the artwork settles: flatter and dimmer, at the same size so its edges
+   still line up with the title and controls. Playing lifts it back. */
+.stage-art {
+  transition:
+    filter 400ms var(--ease-glide),
+    box-shadow 400ms var(--ease-glide);
+}
+.stage[data-paused] .stage-art {
+  filter: brightness(0.75) saturate(0.85);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 0.35);
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage-art {
+    transition: none;
+  }
+}
+
 .stage-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   margin-top: 1.5rem;
   width: 100%;
   min-width: 0;
-  text-align: center;
 }
 
 .stage-title {
-  font-size: 1.5rem;
+  font-size: 1.375rem;
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.02em;
@@ -380,16 +561,15 @@ nav,
   padding-bottom: 0.25rem;
 }
 .stage[data-lyrics] .stage-art {
-  width: 3.25rem;
+  width: 4.5rem;
   border-radius: var(--radius-control);
 }
 .stage[data-lyrics] .stage-meta {
   margin-top: 0;
   flex: 1;
-  text-align: left;
 }
 .stage[data-lyrics] .stage-title {
-  font-size: 1rem;
+  font-size: 1.125rem;
 }
 .stage[data-lyrics] .stage-aside {
   display: none;
@@ -408,10 +588,9 @@ nav,
   .stage[data-lyrics] .stage-meta {
     margin-top: 1.5rem;
     flex: none;
-    text-align: center;
   }
   .stage[data-lyrics] .stage-title {
-    font-size: 1.5rem;
+    font-size: 1.375rem;
   }
   .stage[data-lyrics] .stage-aside {
     display: block;
@@ -430,6 +609,40 @@ nav,
 ::view-transition-new(cover) {
   animation-duration: 300ms;
   height: 100%;
+}
+/* Clicks go through the fading snapshot to the page beneath, so skipping
+   several tracks in a row is not held up by each transition. */
+::view-transition {
+  pointer-events: none;
+}
+/* A track change: a slow, even cross-fade of everything, while the cover slides
+   the way the queue moved — out left on next, out right on previous. */
+html[data-vt]::view-transition-old(root),
+html[data-vt]::view-transition-new(root),
+html[data-vt]::view-transition-group(*) {
+  animation-duration: 700ms;
+  animation-timing-function: ease-in-out;
+}
+html[data-vt]::view-transition-old(cover) {
+  animation: cover-out 500ms var(--ease-glide) both;
+}
+html[data-vt]::view-transition-new(cover) {
+  animation: cover-in 600ms var(--ease-glide) 80ms both;
+}
+html[data-vt="prev"] {
+  --cover-dir: -1;
+}
+@keyframes cover-out {
+  to {
+    opacity: 0;
+    transform: translateX(calc(var(--cover-dir, 1) * -12%)) scale(0.94);
+  }
+}
+@keyframes cover-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--cover-dir, 1) * 12%)) scale(0.94);
+  }
 }
 ::view-transition-new(lyrics):only-child {
   animation: lyrics-in 300ms var(--ease-glide) both;
