@@ -5,8 +5,6 @@ import {
   Fragment,
   RefObject,
   useEffect,
-  useId,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -49,9 +47,12 @@ import {
   shuffled,
 } from "@/lib/music";
 import { getLyrics } from "@/lib/lyrics";
-import { createListener, envelope, heightsOf } from "@/lib/listen";
+import { backdropDim, markTone } from "@/lib/tone";
+import Horizon, { livelyDesk } from "./Horizon";
 import LyricsPanel from "./Lyrics";
-import { createPortal, flushSync } from "react-dom";
+import { useMiniPlayer } from "./MiniPlayer";
+import { Backdrop, Btn, useArtTone } from "./PlayerKit";
+import { flushSync } from "react-dom";
 import Image from "next/image";
 
 /** Feeds the styled range its filled (and buffered) proportion; see .range in globals.css. */
@@ -60,15 +61,6 @@ const filled = (value: number, max: number, buffered = 0) =>
     "--range-pct": `${max > 0 ? (value / max) * 100 : 0}%`,
     "--buffered-pct": `${max > 0 ? (buffered / max) * 100 : 0}%`,
   }) as CSSProperties;
-
-type PipApi = {
-  window: Window | null;
-  requestWindow(o: { width: number; height: number }): Promise<Window>;
-};
-/** Document Picture-in-Picture, Chrome and Edge only; untyped in lib.dom. */
-const pipApi = () =>
-  (window as unknown as { documentPictureInPicture?: PipApi })
-    .documentPictureInPicture;
 
 type Props = {
   queue: Track[];
@@ -111,9 +103,9 @@ export default function Player({
   const [lyricsChecked, setLyricsChecked] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [order, setOrder] = useState<number[] | null>(null);
-  const [pip, setPip] = useState<Window | null>(null);
 
   const track = queue[index];
+  const hasAudio = !!track;
   const artLum = useArtTone(track?.artwork).lum;
   const lyricsless = !!track && noLyrics === track.id;
   const lyricsChecking = !!track && lyricsChecked !== track.id;
@@ -167,25 +159,6 @@ export default function Player({
     t.ready.catch(() => {});
     t.finished.finally(() => delete root.dataset.vt);
   };
-  /** A floating window rendered through a portal, so it drives this same player. */
-  const openMiniPlayer = async () => {
-    const api = pipApi();
-    if (!api || api.window) return;
-    const w = await api.requestWindow({ width: 320, height: 190 });
-    for (const n of document.head.querySelectorAll(
-      "style, link[rel=stylesheet]",
-    )) {
-      const c = n.cloneNode(true) as Element;
-      // The PiP document is about:blank, so relative hrefs would not resolve.
-      if (n instanceof HTMLLinkElement) c.setAttribute("href", n.href);
-      w.document.head.append(c);
-    }
-    w.document.documentElement.className = document.documentElement.className;
-    w.addEventListener("pagehide", () => setPip(null));
-    setPip(w);
-  };
-  useEffect(() => () => pip?.close(), [pip]);
-
   useEffect(() => {
     if (!playing || !track) return;
     const was = document.title;
@@ -263,6 +236,25 @@ export default function Player({
     step(-1);
   };
 
+  const seekMax = dur || track?.duration || 0;
+  const seek = (t: number) => {
+    setTime(t);
+    if (audioRef.current) audioRef.current.currentTime = t;
+  };
+
+  const mini = useMiniPlayer({
+    track,
+    playing,
+    setPlaying,
+    time,
+    dur: seekMax,
+    onSeek: seek,
+    next,
+    prev,
+    audio: audioRef,
+    analyser: graph,
+  });
+
   // Load the source whenever the track changes. Local tracks come out of IndexedDB
   // as an object URL, so the previous one gets revoked to avoid leaking blobs.
   useEffect(() => {
@@ -319,7 +311,7 @@ export default function Player({
   // screen lock, which would stop background playback.
   useEffect(() => {
     const a = audioRef.current;
-    if (!a || !(full || pip) || !playing) return;
+    if (!a || !(full || mini.window) || !playing) return;
     if (!graph.current && livelyDesk()) {
       try {
         const ctx = new AudioContext();
@@ -333,11 +325,10 @@ export default function Player({
       } catch {}
     }
     graph.current?.ctx.resume().catch(() => {});
-  }, [full, pip, playing]);
+  }, [full, mini.window, playing]);
 
   // The <audio> only mounts once there is a track, after the restored settings
   // first run, so they are applied again when it appears.
-  const hasAudio = !!track;
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume, hasAudio]);
@@ -396,14 +387,6 @@ export default function Player({
     navigator.mediaSession.setActionHandler("seekforward", (d) =>
       jump((audioRef.current?.currentTime ?? 0) + (d.seekOffset ?? 10)),
     );
-    // Lets Chrome open the mini player itself when the tab is left mid-song.
-    try {
-      if (pipApi())
-        navigator.mediaSession.setActionHandler(
-          "enterpictureinpicture" as MediaSessionAction,
-          () => void openMiniPlayer().catch(() => {}),
-        );
-    } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track, index, queue, shuffle, repeat]);
 
@@ -450,7 +433,7 @@ export default function Player({
 
       switch (e.code) {
         case "Escape":
-          if (pip && el?.ownerDocument === pip.document) return pip.close();
+          if (el?.ownerDocument === mini.window?.document) return mini.close();
           if (full && lyricsOn) return setShowLyrics(false);
           return setFull(false);
         case "KeyY":
@@ -468,12 +451,11 @@ export default function Player({
           return setPlaying(!playing);
         case "KeyI":
           e.preventDefault();
-          if (pip) return pip.close();
-          if (!pipApi())
-            return void toast("The mini player needs Chrome or Edge", {
+          if (!mini.supported)
+            return void toast("This browser can't open the mini player", {
               id: "mini",
             });
-          return void openMiniPlayer().catch(() => {});
+          return mini.toggle();
         case "KeyF":
           e.preventDefault();
           return full ? setFull(false) : openFull(false);
@@ -527,6 +509,7 @@ export default function Player({
     };
     window.addEventListener("keydown", onKey);
     // The mini player is its own window, so it needs its own listener.
+    const pip = mini.window;
     pip?.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
@@ -534,7 +517,8 @@ export default function Player({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    pip,
+    mini.window,
+    mini.isOpen,
     full,
     showQueue,
     showLyrics,
@@ -557,12 +541,6 @@ export default function Player({
   }, [full]);
 
   if (!track) return null;
-
-  const seekMax = dur || track.duration || 0;
-  const seek = (t: number) => {
-    setTime(t);
-    if (audioRef.current) audioRef.current.currentTime = t;
-  };
 
   return (
     <>
@@ -597,22 +575,7 @@ export default function Player({
         onError={() => fail("Playback failed.")}
       />
 
-      {pip &&
-        createPortal(
-          <MiniPlayer
-            track={track}
-            playing={playing}
-            setPlaying={setPlaying}
-            next={next}
-            prev={prev}
-            time={time}
-            dur={seekMax}
-            onSeek={seek}
-            audio={audioRef}
-            analyser={graph}
-          />,
-          pip.document.body,
-        )}
+      {mini.portal}
 
       {full && (
         <FullView
@@ -654,10 +617,8 @@ export default function Player({
             onGoTo(kind, name);
           }}
           onClose={() => setFull(false)}
-          onMini={
-            pipApi() ? () => void openMiniPlayer().catch(() => {}) : undefined
-          }
-          mini={!!pip}
+          onMini={mini.supported ? mini.toggle : undefined}
+          mini={mini.isOpen}
         />
       )}
 
@@ -799,10 +760,10 @@ export default function Player({
                   iconSize={14}
                   overContent
                 />
-                {!!pipApi() && (
+                {mini.supported && (
                   <Btn
-                    onClick={() => void openMiniPlayer().catch(() => {})}
-                    active={!!pip}
+                    onClick={mini.toggle}
+                    active={mini.isOpen}
                     label="Mini player (I)"
                   >
                     <TbPictureInPicture />
@@ -814,222 +775,6 @@ export default function Player({
         </div>
       </div>
     </>
-  );
-}
-
-/** `unavailable` uses aria-disabled so the reason in the tooltip stays reachable. */
-function Btn({
-  onClick,
-  children,
-  active,
-  label,
-  unavailable,
-  busy,
-}: {
-  onClick: () => void;
-  children: React.ReactNode;
-  active?: boolean;
-  label: string;
-  unavailable?: string | false;
-  busy?: string | false;
-}) {
-  return (
-    <button
-      onClick={unavailable ? undefined : onClick}
-      aria-label={unavailable ? `${label}: ${unavailable}` : label}
-      title={unavailable || busy || label}
-      aria-busy={busy ? true : undefined}
-      aria-pressed={unavailable ? undefined : active}
-      aria-disabled={unavailable ? true : undefined}
-      className={`grid h-8 w-8 place-items-center rounded-full text-sm transition ${
-        unavailable
-          ? "cursor-not-allowed text-label-2 opacity-35"
-          : `hover:bg-fill active:scale-95 ${active ? "text-accent" : "text-label-2 hover:text-label"} ${busy ? "animate-pulse" : ""}`
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** Window sizes the mini player snaps back into; the max is its default size. */
-const MINI = { minW: 240, maxW: 320, minH: 64, maxH: 134 };
-const clamp = (v: number, lo: number, hi: number) =>
-  Math.min(Math.max(v, lo), hi);
-
-function MiniPlayer({
-  track,
-  playing,
-  setPlaying,
-  next,
-  prev,
-  time,
-  dur,
-  onSeek,
-  audio,
-  analyser,
-}: {
-  track: Track;
-  playing: boolean;
-  setPlaying: (p: boolean) => void;
-  next: () => void;
-  prev: () => void;
-  time: number;
-  dur: number;
-  onSeek: (t: number) => void;
-  audio: RefObject<HTMLAudioElement | null>;
-  analyser: RefObject<{ an: AnalyserNode } | null>;
-}) {
-  const art = track.artworkLarge ?? track.artwork;
-  const { lum, hue } = useArtTone(art);
-  const [hover, setHover] = useState<number | null>(null);
-  const pct = dur > 0 ? (time / dur) * 100 : 0;
-  const lo = Math.min(pct, hover ?? pct);
-  const hi = Math.max(pct, hover ?? pct);
-  const root = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const win = root.current?.ownerDocument.defaultView;
-    if (!win) return;
-    // A page cannot bound a PiP window, and resizing needs a user gesture in
-    // it, so an out-of-range size snaps back on the next press inside.
-    const snap = () => {
-      const w = clamp(win.innerWidth, MINI.minW, MINI.maxW);
-      const h = clamp(win.innerHeight, MINI.minH, MINI.maxH);
-      if (w !== win.innerWidth || h !== win.innerHeight)
-        try {
-          win.resizeBy(w - win.innerWidth, h - win.innerHeight);
-        } catch {}
-    };
-    win.addEventListener("pointerdown", snap, true);
-    return () => win.removeEventListener("pointerdown", snap, true);
-  }, []);
-
-  return (
-    <div
-      ref={root}
-      className="relative h-screen overflow-hidden bg-canvas text-white"
-    >
-      {art && (
-        <div
-          aria-hidden
-          data-playing={playing || undefined}
-          className="flow pointer-events-none absolute inset-0"
-        >
-          <img src={art} alt="" className="flow-base" />
-          {[0, 1, 2, 3].map((i) => (
-            <img key={i} src={art} alt="" />
-          ))}
-        </div>
-      )}
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundColor: `rgb(0 0 0 / ${lum === null ? 0.45 : 0.25 + lum * 0.5})`,
-        }}
-      />
-      <div className="absolute inset-0 flex flex-col justify-center gap-2 p-3 [@media(max-height:71px)]:py-2">
-        <div className="flex items-center gap-3">
-          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-[10px] [@media(max-height:71px)]:hidden [@media(max-width:269px)]:hidden shadow-lg shadow-black/40 ring-1 ring-white/10">
-            {track.artwork ? (
-              <img
-                src={track.artwork}
-                alt=""
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="grid h-full w-full place-items-center bg-white/10 text-white/50">
-                <TbMusic size={22} />
-              </div>
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{track.title}</div>
-            <div className="truncate text-xs text-white/70">{track.artist}</div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <Btn onClick={prev} label="Previous">
-              <TbPlayerTrackPrevFilled />
-            </Btn>
-            <button
-              onClick={() => setPlaying(!playing)}
-              aria-label={playing ? "Pause" : "Play"}
-              title={playing ? "Pause" : "Play"}
-              className="group grid h-10 w-10 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 transition hover:scale-105 active:scale-95"
-            >
-              {playing ? (
-                <span className="morph-out">
-                  <Logo
-                    size={20}
-                    live
-                    art={track.artwork}
-                    tone={markTone(lum)}
-                    className="live-mark"
-                  />
-                </span>
-              ) : (
-                <TbPlayerPlayFilled size={18} />
-              )}
-            </button>
-            <Btn onClick={next} label="Next">
-              <TbPlayerTrackNextFilled />
-            </Btn>
-          </div>
-        </div>
-        <div className="flex max-h-16 min-h-10 flex-1 items-center gap-2 [@media(max-height:119px)]:hidden">
-          <span className="text-xxs tabular-nums text-white/70 [@media(max-width:299px)]:hidden">
-            {fmtTime(time)}
-          </span>
-          <div className="relative h-full flex-1">
-            <div
-              className="absolute inset-0"
-              style={{
-                maskImage: `linear-gradient(to right, #000 ${lo}%, rgb(0 0 0 / 0.75) ${lo}% ${hi}%, rgb(0 0 0 / 0.5) ${hi}%)`,
-              }}
-            >
-              <Horizon
-                key={track.id}
-                track={track}
-                playing={playing}
-                hue={hue}
-                analyser={analyser}
-                audio={audio}
-                compact
-              />
-            </div>
-            {hover !== null && dur > 0 && (
-              <span
-                className="pointer-events-none absolute bottom-full -translate-x-1/2 rounded-md bg-black/80 px-1.5 py-0.5 text-xxs tabular-nums text-white"
-                style={{ left: `${hover}%` }}
-              >
-                {fmtTime((hover / 100) * dur)}
-              </span>
-            )}
-            <input
-              type="range"
-              min={0}
-              max={dur || 0}
-              step="any"
-              value={Math.min(time, dur || 0)}
-              onChange={(e) => onSeek(Number(e.target.value))}
-              onPointerMove={(e) => {
-                const r = e.currentTarget.getBoundingClientRect();
-                setHover(
-                  Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1) *
-                    100,
-                );
-              }}
-              onPointerLeave={() => setHover(null)}
-              aria-label="Seek"
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            />
-          </div>
-          <span className="text-xxs tabular-nums text-white/70 [@media(max-width:299px)]:hidden">
-            {fmtTime(dur)}
-          </span>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -1076,266 +821,6 @@ function Seek({
         style={filled(time, dur, buffered)}
         aria-label="Seek"
       />
-    </div>
-  );
-}
-
-/** Loudness values per second in a decoded envelope. */
-const ENV_RATE = 40;
-
-/** A mouse-driven screen without Reduce Motion: where the horizon listens. */
-const livelyDesk = () =>
-  window.matchMedia("(hover: hover) and (pointer: fine)").matches &&
-  !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-/** Loop heights from the track id: the same song always draws the same line. */
-function waveHeights(seed: string, n: number) {
-  let h = 2166136261;
-  for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
-  const rand = () => {
-    h = Math.imul(h ^ (h >>> 15), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    return ((h ^= h >>> 16) >>> 0) / 4294967296;
-  };
-  const raw = Array.from({ length: n }, rand);
-  // Neighbours wrap around, so the pattern tiles without a seam.
-  return raw.map((v, i) => {
-    const smooth = (raw.at(i - 1)! + v * 6 + raw[(i + 1) % n]) / 8;
-    return 0.3 + 0.7 * smooth ** 1.2;
-  });
-}
-
-/**
- * Tall, narrow loops, alternately up and down, rounded at the turns; `heights`
- * are 0–1 per loop. `shift` slides the line left by part of a loop, and `flip`
- * starts it on a downstroke.
- */
-function loopPath(
-  heights: number[],
-  step: number,
-  H: number,
-  shift = 0,
-  flip = false,
-) {
-  const mid = H / 2;
-  const r = step / 2;
-  let path = `M${-shift} ${mid}`;
-  heights.forEach((a, i) => {
-    const x = i * step - shift;
-    const reach = Math.max(a * (mid - 2), r + 0.5);
-    path +=
-      (i % 2 === 0) !== flip
-        ? ` L${x} ${mid - reach + r} A${r} ${r} 0 0 1 ${x + step} ${mid - reach + r}`
-        : ` L${x} ${mid + reach - r} A${r} ${r} 0 0 0 ${x + step} ${mid + reach - r}`;
-  });
-  return path;
-}
-
-/**
- * The full view's waveform. On a desktop it is the song's decoded loudness
- * around the playhead (right edge = now); elsewhere a seeded pattern, flowing.
- */
-function Horizon({
-  track,
-  playing,
-  hue,
-  analyser,
-  audio,
-  compact,
-}: {
-  track: Track;
-  playing: boolean;
-  hue: number | null;
-  analyser: RefObject<{ an: AnalyserNode } | null>;
-  audio: RefObject<HTMLAudioElement | null>;
-  compact?: boolean;
-}) {
-  const box = useRef<HTMLDivElement>(null);
-  const grad = useId();
-
-  const seed = track.id;
-  const [desk] = useState(livelyDesk);
-  const env = useRef<Float32Array | null>(null);
-  useEffect(() => {
-    if (!desk) return;
-    let gone = false;
-    let url: string | undefined;
-    (async () => {
-      url = await audioSrc(track);
-      if (!url || gone) return;
-      const data = await (await fetch(url)).arrayBuffer();
-      // 8 kHz keeps a whole song to a few MB; plenty for loudness.
-      const buf = await new OfflineAudioContext(1, 1, 8000).decodeAudioData(
-        data,
-      );
-      if (!gone) env.current = heightsOf(envelope(buf, ENV_RATE));
-    })()
-      .catch(() => {})
-      .finally(() => url?.startsWith("blob:") && URL.revokeObjectURL(url));
-    return () => void (gone = true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track.id, desk]);
-  const stops =
-    hue === null
-      ? ["#8e97aa", "#d3d8e3", "#ffffff"]
-      : [
-          `hsl(${hue - 35} 85% 56%)`,
-          `hsl(${hue} 85% 68%)`,
-          `hsl(${hue + 35} 95% 88%)`,
-        ];
-  const [w, setW] = useState(0);
-  const [boxH, setBoxH] = useState(0);
-  useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const ro = new (el.ownerDocument.defaultView ?? window).ResizeObserver(
-      () => {
-        setW(el.clientWidth);
-        setBoxH(el.clientHeight);
-      },
-    );
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // Quieter on a phone, where the same band would crowd the controls.
-  const small = w > 0 && w < 640;
-  const k = compact || small ? 1 : 0.85;
-  // Compact fills whatever height its box is given.
-  // Glow room above and below the line; compact trades some for amplitude.
-  const pad = compact ? 5 : 10;
-  const H = compact ? Math.max(boxH - 2 * pad, 14) : small ? 40 : 64 * k;
-  const step = compact ? 4 : small ? 5 : 6 * k;
-  // An even loop count, so each copy of the pattern starts on an upstroke.
-  const n = Math.floor(w / step / 2) * 2;
-  const period = n * step;
-  // Three copies: the view slides one period, and the width can run a loop past it.
-  const d = useMemo(() => {
-    if (!n) return "";
-    const hs = waveHeights(seed, n);
-    return loopPath([...hs, ...hs, ...hs], step, H);
-  }, [seed, n, H, step]);
-
-  useEffect(() => {
-    const el = box.current;
-    const a = audio.current;
-    if (!el || !a || !desk || !n) return;
-    // In the mini player: the hidden tab's own frames stop, that window's do not.
-    const win = el.ownerDocument.defaultView ?? window;
-    const paths = el.querySelectorAll("path");
-    const cols = Math.ceil(w / step) + 2;
-    const speed = 70;
-    const slice = step / speed;
-    const rest = waveHeights(`${seed}:rest`, 64).map(
-      (h) => 0.1 + 0.5 * ((h - 0.3) / 0.7) ** 1.6,
-    );
-    const hear = createListener();
-    const heights = new Array<number>(cols);
-    let freq: Uint8Array<ArrayBuffer> | null = null;
-    let clock = a.currentTime;
-    let morph = 0;
-    let hadEnv = !!env.current;
-    let drawn = "";
-    let last = performance.now();
-    let frame = 0;
-    el.dataset.reactive = "";
-    const tick = (now: number) => {
-      const dt = (now - last) / 1000;
-      last = now;
-      // currentTime advances in coarse steps; a local clock keeps the scroll smooth.
-      if (!a.paused) clock += dt * a.playbackRate;
-      const jumped = Math.abs(clock - a.currentTime) > 0.15;
-      if (jumped || (env.current && !hadEnv)) morph = 0.5;
-      hadEnv = !!env.current;
-      if (a.paused || jumped) clock = a.currentTime;
-
-      const lv = env.current;
-      const pos = clock / slice;
-      const endJ = Math.floor(pos);
-      const j0 = endJ - cols + 1;
-      for (let i = 0; i < cols; i++) {
-        const j = j0 + i;
-        const from = Math.floor(j * slice * ENV_RATE);
-        const to = Math.ceil((j + 1) * slice * ENV_RATE);
-        let v = -1;
-        if (lv && from >= 0)
-          for (let e = from; e < to && e < lv.length; e++)
-            v = Math.max(v, lv[e]);
-        const target = v >= 0 ? v : rest[((j % 64) + 64) % 64];
-        heights[i] =
-          morph > 0 && heights[i] !== undefined
-            ? heights[i] + (target - heights[i]) * (1 - Math.exp(-dt / 0.1))
-            : target;
-      }
-      morph = Math.max(morph - dt, 0);
-      const path = loopPath(
-        heights,
-        step,
-        H,
-        (pos - endJ) * step,
-        ((j0 % 2) + 2) % 2 === 1,
-      );
-      if (path !== drawn) {
-        for (const p of paths) p.setAttribute("d", path);
-        drawn = path;
-      }
-
-      const an = analyser.current?.an;
-      if (an && !a.paused) {
-        freq ??= new Uint8Array(an.frequencyBinCount);
-        an.getByteFrequencyData(freq);
-        const h = hear(freq, dt);
-        el.style.setProperty("--pulse", h.pulse.toFixed(3));
-        el.style.setProperty("--bright", h.bright.toFixed(3));
-      }
-      frame = win.requestAnimationFrame(tick);
-    };
-    frame = win.requestAnimationFrame(tick);
-    return () => win.cancelAnimationFrame(frame);
-  }, [desk, analyser, audio, seed, n, w, H, step]);
-
-  return (
-    <div
-      ref={box}
-      aria-hidden
-      data-playing={playing || undefined}
-      className="horizon pointer-events-none absolute inset-0"
-      style={
-        {
-          "--period": `-${period}px`,
-          "--flow-time": `${period / 40}s`,
-          "--glow": stops[1],
-          "--k": k,
-          "--pad": `${pad}px`,
-        } as CSSProperties
-      }
-    >
-      <div className="horizon-band" style={{ height: H + 2 * pad * k }}>
-        <div className="horizon-line">
-          <svg width={period * 3} height={H}>
-            <defs>
-              <linearGradient
-                id={grad}
-                gradientUnits="userSpaceOnUse"
-                x1="0"
-                y1={H}
-                x2="0"
-                y2="0"
-              >
-                {stops.map((c, i) => (
-                  <stop key={i} offset={i / 2} stopColor={c} />
-                ))}
-              </linearGradient>
-            </defs>
-            <path d={d} style={{ stroke: `url(#${CSS.escape(grad)})` }} />
-          </svg>
-        </div>
-        <div className="horizon-line horizon-shine">
-          <svg width={period * 3} height={H}>
-            <path d={d} />
-          </svg>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1691,66 +1176,6 @@ function TrackMenu({
   );
 }
 
-/** Brightness scale that keeps the cover-filled mark visible on the light play button. */
-const markTone = (lum: number | null) =>
-  lum === null ? 0.6 : Math.min(1, 0.3 / lum);
-
-/**
- * Reads an image once: its average luminance (0–1), and the hue of its most
- * vivid colour (null when the art is greyscale). Both are null when the image
- * can't be read (no CORS, no art).
- */
-function useArtTone(src?: string) {
-  const [tone, setTone] = useState<{
-    lum: number | null;
-    hue: number | null;
-  }>({ lum: null, hue: null });
-  useEffect(() => {
-    if (!src) return;
-    const img = document.createElement("img");
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      try {
-        const c = document.createElement("canvas");
-        c.width = c.height = 8;
-        const g = c.getContext("2d")!;
-        g.drawImage(img, 0, 0, 8, 8);
-        const d = g.getImageData(0, 0, 8, 8).data;
-        let sum = 0;
-        let best = { s: 0, h: 0 };
-        for (let i = 0; i < d.length; i += 4) {
-          const [r, gr, b] = [d[i] / 255, d[i + 1] / 255, d[i + 2] / 255];
-          sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-          const max = Math.max(r, gr, b);
-          const span = max - Math.min(r, gr, b);
-          // Chroma, so a dark muddy pixel does not outrank a clear colour.
-          if (span > best.s) {
-            const h =
-              max === r
-                ? ((gr - b) / span) % 6
-                : max === gr
-                  ? (b - r) / span + 2
-                  : (r - gr) / span + 4;
-            best = { s: span, h: (h * 60 + 360) % 360 };
-          }
-        }
-        setTone({
-          lum: sum / 64 / 255,
-          hue: best.s > 0.15 ? Math.round(best.h) : null,
-        });
-      } catch {
-        setTone({ lum: null, hue: null });
-      }
-    };
-    img.onerror = () => setTone({ lum: null, hue: null });
-    img.src = src;
-    return () => {
-      img.onload = img.onerror = null;
-    };
-  }, [src]);
-  return tone;
-}
-
 /** Fills the page (not the browser) — the cover blurred behind itself, queue on the left. */
 function FullView({
   track,
@@ -1838,32 +1263,13 @@ function FullView({
     top: boolean;
     cover: boolean;
   } | null>(null);
-  const dim = Math.min(
-    (lum === null ? 0.45 : 0.25 + lum * 0.5) + (showLyrics ? 0.2 : 0),
-    0.85,
-  );
+  const dim = Math.min(backdropDim(lum) + (showLyrics ? 0.2 : 0), 0.85);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-canvas text-white">
-      {/* The cover doubles as its own backdrop — the ambient wash with no colour API. */}
-      {art && (
-        <div
-          aria-hidden
-          data-playing={playing || undefined}
-          className="flow pointer-events-none absolute inset-0"
-        >
-          <img src={art} alt="" className="flow-base" />
-          {[0, 1, 2, 3].map((i) => (
-            <img key={i} src={art} alt="" />
-          ))}
-        </div>
-      )}
       {/* The Clear variant floats over media; artwork can be bright, so it gets a
           dimming layer to keep the controls legible (HIG — Liquid Glass > Clear). */}
-      <div
-        className="pointer-events-none absolute inset-0 transition-colors duration-300 ease-glide"
-        style={{ backgroundColor: `rgb(0 0 0 / ${dim})` }}
-      />
+      <Backdrop art={art} playing={playing} dim={dim} />
       <Horizon
         key={track.id}
         track={track}
