@@ -367,7 +367,7 @@ nav,
 /* The inset leaves the glow room; the band would clip it. */
 .horizon-line {
   position: absolute;
-  inset: calc(10px * var(--k)) 0;
+  inset: calc(var(--pad, 10px) * var(--k)) 0;
   opacity: 0.12;
   filter: drop-shadow(0 0 calc(3px * var(--k)) var(--glow));
   transition: opacity 900ms var(--ease-glide);
