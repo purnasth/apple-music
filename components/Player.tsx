@@ -5,6 +5,7 @@ import {
   Fragment,
   RefObject,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -48,6 +49,7 @@ import {
   shuffled,
 } from "@/lib/music";
 import { getLyrics } from "@/lib/lyrics";
+import { createListener, envelope, heightsOf } from "@/lib/listen";
 import LyricsPanel from "./Lyrics";
 import { flushSync } from "react-dom";
 import Image from "next/image";
@@ -79,6 +81,7 @@ export default function Player({
   onGoTo,
 }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const graph = useRef<{ ctx: AudioContext; an: AnalyserNode } | null>(null);
   const objectUrl = useRef<string | null>(null);
   // The saved session seeds settings; the queue itself is restored by the page.
   const [init] = useState(getSession);
@@ -275,6 +278,26 @@ export default function Player({
       navigator.mediaSession.playbackState = playing ? "playing" : "paused";
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing]);
+
+  // Desktop only: once the element feeds Web Audio, iOS suspends it with the
+  // screen lock, which would stop background playback.
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a || !full || !playing) return;
+    if (!graph.current && livelyDesk()) {
+      try {
+        const ctx = new AudioContext();
+        const an = ctx.createAnalyser();
+        an.fftSize = 1024;
+        // Onset detection needs the raw jump between frames.
+        an.smoothingTimeConstant = 0;
+        ctx.createMediaElementSource(a).connect(an);
+        an.connect(ctx.destination);
+        graph.current = { ctx, an };
+      } catch {}
+    }
+    graph.current?.ctx.resume().catch(() => {});
+  }, [full, playing]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
@@ -487,6 +510,9 @@ export default function Player({
       {/* Stays mounted across the view switch — remounting it would restart the track. */}
       <audio
         ref={audioRef}
+        // Without CORS mode Web Audio outputs silence; every source here allows
+        // it (same-origin /songs, blob: imports, Deezer's CDN sends ACAO *).
+        crossOrigin="anonymous"
         preload="auto"
         onTimeUpdate={(e) => {
           const a = e.currentTarget;
@@ -542,6 +568,7 @@ export default function Player({
           lyricsChecking={lyricsChecking}
           toggleLyrics={toggleLyrics}
           audio={audioRef}
+          analyser={graph}
           error={error}
           onAddTo={() => onAddTo(track)}
           queuePos={index + 1}
@@ -789,6 +816,14 @@ function Seek({
   );
 }
 
+/** Loudness values per second in a decoded envelope. */
+const ENV_RATE = 40;
+
+/** A mouse-driven screen without Reduce Motion: where the horizon listens. */
+const livelyDesk = () =>
+  window.matchMedia("(hover: hover) and (pointer: fine)").matches &&
+  !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 /** Loop heights from the track id: the same song always draws the same line. */
 function waveHeights(seed: string, n: number) {
   let h = 2166136261;
@@ -807,19 +842,81 @@ function waveHeights(seed: string, n: number) {
 }
 
 /**
- * The full view's horizon: one continuous line of tall, narrow loops that flows
- * right to left while the song plays and settles when it pauses. Decoration only.
+ * Tall, narrow loops, alternately up and down, rounded at the turns; `heights`
+ * are 0–1 per loop. `shift` slides the line left by part of a loop, and `flip`
+ * starts it on a downstroke.
+ */
+function loopPath(
+  heights: number[],
+  step: number,
+  H: number,
+  shift = 0,
+  flip = false,
+) {
+  const mid = H / 2;
+  const r = step / 2;
+  let path = `M${-shift} ${mid}`;
+  heights.forEach((a, i) => {
+    const x = i * step - shift;
+    const reach = Math.max(a * (mid - 2), r + 0.5);
+    path +=
+      (i % 2 === 0) !== flip
+        ? ` L${x} ${mid - reach + r} A${r} ${r} 0 0 1 ${x + step} ${mid - reach + r}`
+        : ` L${x} ${mid + reach - r} A${r} ${r} 0 0 0 ${x + step} ${mid + reach - r}`;
+  });
+  return path;
+}
+
+/**
+ * The full view's waveform. On a desktop it is the song's decoded loudness
+ * around the playhead (right edge = now); elsewhere a seeded pattern, flowing.
  */
 function Horizon({
-  seed,
+  track,
   playing,
-  tint,
+  hue,
+  analyser,
+  audio,
 }: {
-  seed: string;
+  track: Track;
   playing: boolean;
-  tint: string | null;
+  hue: number | null;
+  analyser: RefObject<{ an: AnalyserNode } | null>;
+  audio: RefObject<HTMLAudioElement | null>;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  const grad = useId();
+
+  const seed = track.id;
+  const [desk] = useState(livelyDesk);
+  const env = useRef<Float32Array | null>(null);
+  useEffect(() => {
+    if (!desk) return;
+    let gone = false;
+    let url: string | undefined;
+    (async () => {
+      url = await audioSrc(track);
+      if (!url || gone) return;
+      const data = await (await fetch(url)).arrayBuffer();
+      // 8 kHz keeps a whole song to a few MB; plenty for loudness.
+      const buf = await new OfflineAudioContext(1, 1, 8000).decodeAudioData(
+        data,
+      );
+      if (!gone) env.current = heightsOf(envelope(buf, ENV_RATE));
+    })()
+      .catch(() => {})
+      .finally(() => url?.startsWith("blob:") && URL.revokeObjectURL(url));
+    return () => void (gone = true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track.id, desk]);
+  const stops =
+    hue === null
+      ? ["#8e97aa", "#d3d8e3", "#ffffff"]
+      : [
+          `hsl(${hue - 35} 85% 56%)`,
+          `hsl(${hue} 85% 68%)`,
+          `hsl(${hue + 35} 95% 88%)`,
+        ];
   const [w, setW] = useState(0);
   useEffect(() => {
     const el = box.current;
@@ -831,54 +928,135 @@ function Horizon({
 
   // Quieter on a phone, where the same band would crowd the controls.
   const small = w > 0 && w < 640;
-  const H = small ? 40 : 64;
-  const step = small ? 5 : 6;
+  const k = small ? 1 : 0.85;
+  const H = small ? 40 : 64 * k;
+  const step = small ? 5 : 6 * k;
   // An even loop count, so each copy of the pattern starts on an upstroke.
   const n = Math.floor(w / step / 2) * 2;
   const period = n * step;
+  // Three copies: the view slides one period, and the width can run a loop past it.
   const d = useMemo(() => {
     if (!n) return "";
-    const mid = H / 2;
-    const r = step / 2;
-    const heights = waveHeights(seed, n);
-    let path = `M0 ${mid}`;
-    // Three copies: the view slides one period, and the width can run a loop past it.
-    for (let i = 0; i < n * 3; i++) {
-      const x = i * step;
-      const reach = Math.max(heights[i % n] * (mid - 2), r + 0.5);
-      path +=
-        i % 2 === 0
-          ? ` L${x} ${mid - reach + r} A${r} ${r} 0 0 1 ${x + step} ${mid - reach + r}`
-          : ` L${x} ${mid + reach - r} A${r} ${r} 0 0 0 ${x + step} ${mid + reach - r}`;
-    }
-    return path;
+    const hs = waveHeights(seed, n);
+    return loopPath([...hs, ...hs, ...hs], step, H);
   }, [seed, n, H, step]);
+
+  useEffect(() => {
+    const el = box.current;
+    const a = audio.current;
+    if (!el || !a || !desk || !n) return;
+    const paths = el.querySelectorAll("path");
+    const cols = Math.ceil(w / step) + 2;
+    const speed = 70;
+    const slice = step / speed;
+    const rest = waveHeights(`${seed}:rest`, 64).map(
+      (h) => 0.1 + 0.5 * ((h - 0.3) / 0.7) ** 1.6,
+    );
+    const hear = createListener();
+    const heights = new Array<number>(cols);
+    let freq: Uint8Array<ArrayBuffer> | null = null;
+    let clock = a.currentTime;
+    let morph = 0;
+    let hadEnv = !!env.current;
+    let drawn = "";
+    let last = performance.now();
+    let frame = 0;
+    el.dataset.reactive = "";
+    const tick = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      // currentTime advances in coarse steps; a local clock keeps the scroll smooth.
+      if (!a.paused) clock += dt * a.playbackRate;
+      const jumped = Math.abs(clock - a.currentTime) > 0.15;
+      if (jumped || (env.current && !hadEnv)) morph = 0.5;
+      hadEnv = !!env.current;
+      if (a.paused || jumped) clock = a.currentTime;
+
+      const lv = env.current;
+      const pos = clock / slice;
+      const endJ = Math.floor(pos);
+      const j0 = endJ - cols + 1;
+      for (let i = 0; i < cols; i++) {
+        const j = j0 + i;
+        const from = Math.floor(j * slice * ENV_RATE);
+        const to = Math.ceil((j + 1) * slice * ENV_RATE);
+        let v = -1;
+        if (lv && from >= 0)
+          for (let e = from; e < to && e < lv.length; e++)
+            v = Math.max(v, lv[e]);
+        const target = v >= 0 ? v : rest[((j % 64) + 64) % 64];
+        heights[i] =
+          morph > 0 && heights[i] !== undefined
+            ? heights[i] + (target - heights[i]) * (1 - Math.exp(-dt / 0.1))
+            : target;
+      }
+      morph = Math.max(morph - dt, 0);
+      const path = loopPath(
+        heights,
+        step,
+        H,
+        (pos - endJ) * step,
+        ((j0 % 2) + 2) % 2 === 1,
+      );
+      if (path !== drawn) {
+        for (const p of paths) p.setAttribute("d", path);
+        drawn = path;
+      }
+
+      const an = analyser.current?.an;
+      if (an && !a.paused) {
+        freq ??= new Uint8Array(an.frequencyBinCount);
+        an.getByteFrequencyData(freq);
+        const h = hear(freq, dt);
+        el.style.setProperty("--pulse", h.pulse.toFixed(3));
+        el.style.setProperty("--bright", h.bright.toFixed(3));
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [desk, analyser, audio, seed, n, w, H, step]);
 
   return (
     <div
       ref={box}
       aria-hidden
       data-playing={playing || undefined}
-      className="horizon pointer-events-none absolute inset-x-0 bottom-0"
+      className="horizon pointer-events-none absolute inset-0"
       style={
         {
-          height: H,
           "--period": `-${period}px`,
           "--flow-time": `${period / 40}s`,
-          "--tint": tint ?? "#fff",
+          "--glow": stops[1],
+          "--k": k,
         } as CSSProperties
       }
     >
-      {/* The line, then the same line brighter, shown only under a travelling band of light. */}
-      <div className="horizon-line">
-        <svg width={period * 3} height={H}>
-          <path d={d} />
-        </svg>
-      </div>
-      <div className="horizon-line horizon-shine">
-        <svg width={period * 3} height={H}>
-          <path d={d} />
-        </svg>
+      <div className="horizon-band" style={{ height: H + 20 * k }}>
+        <div className="horizon-line">
+          <svg width={period * 3} height={H}>
+            <defs>
+              <linearGradient
+                id={grad}
+                gradientUnits="userSpaceOnUse"
+                x1="0"
+                y1={H}
+                x2="0"
+                y2="0"
+              >
+                {stops.map((c, i) => (
+                  <stop key={i} offset={i / 2} stopColor={c} />
+                ))}
+              </linearGradient>
+            </defs>
+            <path d={d} style={{ stroke: `url(#${CSS.escape(grad)})` }} />
+          </svg>
+        </div>
+        <div className="horizon-line horizon-shine">
+          <svg width={period * 3} height={H}>
+            <path d={d} />
+          </svg>
+        </div>
       </div>
     </div>
   );
@@ -1231,15 +1409,15 @@ const markTone = (lum: number | null) =>
   lum === null ? 0.6 : Math.min(1, 0.3 / lum);
 
 /**
- * Reads an image once: its average luminance (0–1), and its most vivid colour
- * lifted to a soft, bright tint (null when the art is greyscale). Both are null
- * when the image can't be read (no CORS, no art).
+ * Reads an image once: its average luminance (0–1), and the hue of its most
+ * vivid colour (null when the art is greyscale). Both are null when the image
+ * can't be read (no CORS, no art).
  */
 function useArtTone(src?: string) {
   const [tone, setTone] = useState<{
     lum: number | null;
-    tint: string | null;
-  }>({ lum: null, tint: null });
+    hue: number | null;
+  }>({ lum: null, hue: null });
   useEffect(() => {
     if (!src) return;
     const img = document.createElement("img");
@@ -1271,13 +1449,13 @@ function useArtTone(src?: string) {
         }
         setTone({
           lum: sum / 64 / 255,
-          tint: best.s > 0.15 ? `hsl(${Math.round(best.h)} 75% 72%)` : null,
+          hue: best.s > 0.15 ? Math.round(best.h) : null,
         });
       } catch {
-        setTone({ lum: null, tint: null });
+        setTone({ lum: null, hue: null });
       }
     };
-    img.onerror = () => setTone({ lum: null, tint: null });
+    img.onerror = () => setTone({ lum: null, hue: null });
     img.src = src;
     return () => {
       img.onload = img.onerror = null;
@@ -1316,6 +1494,7 @@ function FullView({
   lyricsChecking,
   toggleLyrics,
   audio,
+  analyser,
   error,
   onAddTo,
   queuePos,
@@ -1351,6 +1530,7 @@ function FullView({
   lyricsChecking: boolean;
   toggleLyrics: () => void;
   audio: RefObject<HTMLAudioElement | null>;
+  analyser: RefObject<{ an: AnalyserNode } | null>;
   error: string | null;
   onAddTo: () => void;
   queuePos: number;
@@ -1359,7 +1539,7 @@ function FullView({
   onClose: () => void;
 }) {
   const art = track.artworkLarge ?? track.artwork;
-  const { lum, tint } = useArtTone(art);
+  const { lum, hue } = useArtTone(art);
   const [remaining, setRemaining] = useState(false);
   const swipe = useRef<{
     x: number;
@@ -1393,7 +1573,14 @@ function FullView({
         className="pointer-events-none absolute inset-0 transition-colors duration-300 ease-glide"
         style={{ backgroundColor: `rgb(0 0 0 / ${dim})` }}
       />
-      <Horizon key={track.id} seed={track.id} playing={playing} tint={tint} />
+      <Horizon
+        key={track.id}
+        track={track}
+        playing={playing}
+        hue={hue}
+        analyser={analyser}
+        audio={audio}
+      />
 
       <button
         onClick={onClose}
@@ -1521,7 +1708,9 @@ function FullView({
           }}
           className={`flex min-w-0 flex-1 flex-col items-center px-4 transition-transform duration-300 ease-out sm:px-6 sm:pb-24 sm:pt-16 ${
             // Lyrics push the controls to the foot; this keeps them above the horizon.
-            showLyrics ? "overflow-hidden pb-14 pt-16" : "overflow-y-auto pb-10 pt-10"
+            showLyrics
+              ? "overflow-hidden pb-14 pt-16"
+              : "overflow-y-auto pb-10 pt-10"
           } ${showQueue ? "lg:translate-x-40" : "translate-x-0"}`}
         >
           <div

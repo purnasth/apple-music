@@ -357,24 +357,24 @@ nav,
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
 }
 
-/* The full view's horizon: a waveform in the cover's colour, flowing right to
-   left while playing, with a band of light travelling along it and a slow
-   breath in brightness. Paused, it freezes where it is and dims to rest; the
-   shape is never scaled, so the loops stay round in both states. */
-.horizon {
+.horizon-band {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
   overflow: hidden;
   mask-image: linear-gradient(to right, transparent, #000 15%, #000 85%, transparent);
 }
+/* The inset leaves the glow room; the band would clip it. */
 .horizon-line {
   position: absolute;
-  inset: 0;
-  opacity: 0.1;
+  inset: calc(10px * var(--k)) 0;
+  opacity: 0.12;
+  filter: drop-shadow(0 0 calc(3px * var(--k)) var(--glow));
   transition: opacity 900ms var(--ease-glide);
 }
 .horizon path {
   fill: none;
-  stroke: var(--tint);
-  stroke-width: 1.5;
+  stroke-width: calc(1.5px * var(--k));
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -389,12 +389,33 @@ nav,
 }
 .horizon-shine {
   opacity: 0;
+  filter: none;
   mask-image: linear-gradient(to right, transparent, #000 50%, transparent);
-  mask-size: 35% 100%;
+  mask-size: 30% 100%;
   mask-repeat: no-repeat;
 }
+.horizon-shine path {
+  stroke: #fff;
+}
 .horizon[data-playing] .horizon-shine {
-  opacity: 0.55;
+  opacity: 0.45;
+  animation: horizon-shine 6s ease-in-out infinite;
+}
+/* Script draws the live line, so the flow animation must stop. */
+.horizon[data-reactive] svg {
+  animation: none;
+}
+.horizon[data-reactive][data-playing] .horizon-line {
+  animation: none;
+  transition: opacity 80ms linear;
+  opacity: calc(0.5 + var(--pulse, 0) * 0.3);
+  filter: drop-shadow(
+    0 0 calc((3px + var(--pulse, 0) * 7px) * var(--k)) var(--glow)
+  );
+}
+.horizon[data-reactive][data-playing] .horizon-shine {
+  opacity: calc(0.25 + var(--bright, 0) * 0.4);
+  filter: none;
   animation: horizon-shine 6s ease-in-out infinite;
 }
 @keyframes horizon-flow {
@@ -404,10 +425,10 @@ nav,
 }
 @keyframes horizon-breathe {
   from {
-    opacity: 0.16;
+    opacity: 0.35;
   }
   to {
-    opacity: 0.3;
+    opacity: 0.55;
   }
 }
 @keyframes horizon-shine {
@@ -425,7 +446,7 @@ nav,
     animation: none;
   }
   .horizon[data-playing] .horizon-line {
-    opacity: 0.22;
+    opacity: 0.45;
   }
   .horizon-shine {
     display: none;
