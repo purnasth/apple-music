@@ -25,7 +25,6 @@ import {
   TbUser,
   TbMicrophone2,
   TbMusic,
-  TbPlayerPauseFilled,
   TbPlayerPlayFilled,
   TbPlayerTrackPrevFilled,
   TbPlayerTrackNextFilled,
@@ -656,20 +655,23 @@ export default function Player({
             layer sits above the content, it is not welded to the screen.
             70rem = the main column's max-w-6xl minus its px-4, so the capsule's
             edges line up with the content above it. */}
-        <div className="glass relative mx-auto max-w-[70rem] overflow-hidden rounded-sheet shadow-2xl shadow-black/50 ring-1 ring-white/10">
-          {/* Glass has no colour of its own — it takes it from what is behind.
-              Nothing is behind a bar at the screen edge, so the artwork stands in
-              and the capsule reads in the album's colour (HIG — Liquid Glass). */}
-          {track.artwork && (
-            <img
-              src={track.artwork}
-              alt=""
-              aria-hidden
-              className="pointer-events-none absolute inset-0 h-full w-full scale-150 object-cover opacity-35 blur-2xl saturate-150"
-            />
-          )}
-          {/* The rim light that gives the material its thickness. */}
-          <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
+        {/* Clipped per layer, not on the capsule, so the volume popover can rise above it. */}
+        <div className="glass relative mx-auto max-w-[70rem] rounded-sheet shadow-2xl shadow-black/50 ring-1 ring-white/10">
+          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-sheet">
+            {/* Glass has no colour of its own — it takes it from what is behind.
+                Nothing is behind a bar at the screen edge, so the artwork stands in
+                and the capsule reads in the album's colour (HIG — Liquid Glass). */}
+            {track.artwork && (
+              <img
+                src={track.artwork}
+                alt=""
+                aria-hidden
+                className="absolute inset-0 h-full w-full scale-150 object-cover opacity-35 blur-2xl saturate-150"
+              />
+            )}
+            {/* The rim light that gives the material its thickness. */}
+            <span className="absolute inset-x-0 top-0 h-px bg-white/20" />
+          </div>
 
           <div className="relative flex items-center gap-3 p-2 sm:gap-4 sm:p-3">
             <button
@@ -730,77 +732,68 @@ export default function Player({
               </div>
             </div>
 
-            <div className="flex items-center gap-1">
-              <span className="hidden sm:block">
-                <Btn onClick={toggleShuffle} active={shuffle} label="Shuffle">
-                  <TbArrowsShuffle />
+            <div className="flex items-center">
+              <div className="flex items-center gap-1">
+                <span className="hidden sm:block">
+                  <Btn onClick={toggleShuffle} active={shuffle} label="Shuffle">
+                    <TbArrowsShuffle />
+                  </Btn>
+                </span>
+                <Btn onClick={prev} label="Previous">
+                  <TbPlayerTrackPrevFilled />
                 </Btn>
-              </span>
-              <Btn onClick={prev} label="Previous">
-                <TbPlayerTrackPrevFilled />
-              </Btn>
-              <button
-                onClick={() => setPlaying(!playing)}
-                aria-label={playing ? "Pause" : "Play"}
-                title={playing ? "Pause" : "Play"}
-                className="group grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
-              >
-                {playing ? (
-                  <span className="morph-out">
-                    <Logo
-                      size={20}
-                      live
-                      art={track.artwork}
-                      tone={markTone(artLum)}
-                      className="live-mark"
-                    />
-                  </span>
-                ) : (
-                  <TbPlayerPlayFilled size={18} />
-                )}
-              </button>
-              <Btn onClick={next} label="Next">
-                <TbPlayerTrackNextFilled />
-              </Btn>
-              <span className="hidden sm:block">
-                <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
-                  <TbRepeat />
-                </Btn>
-              </span>
-              {!!pipApi() && (
-                <Btn
-                  onClick={() => void openMiniPlayer().catch(() => {})}
-                  active={!!pip}
-                  label="Mini player"
-                >
-                  <TbPictureInPicture />
-                </Btn>
-              )}
-              <span className="ml-2 hidden items-center gap-2 sm:flex">
                 <button
-                  onClick={() => setMuted(!muted)}
-                  aria-label={muted ? "Unmute" : "Mute"}
-                  title={muted ? "Unmute (M)" : "Mute (M)"}
-                  aria-pressed={muted}
-                  className="shrink-0 text-label-2 transition hover:text-label"
+                  onClick={() => setPlaying(!playing)}
+                  aria-label={playing ? "Pause" : "Play"}
+                  title={playing ? "Pause" : "Play"}
+                  className="group grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
                 >
-                  {muted ? <TbVolumeOff size={16} /> : <TbVolume size={16} />}
+                  {playing ? (
+                    <span className="morph-out">
+                      <Logo
+                        size={20}
+                        live
+                        art={track.artwork}
+                        tone={markTone(artLum)}
+                        className="live-mark"
+                      />
+                    </span>
+                  ) : (
+                    <TbPlayerPlayFilled size={18} />
+                  )}
                 </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={muted ? 0 : volume}
-                  onChange={(e) => {
-                    setMuted(false);
-                    setVolume(Number(e.target.value));
-                  }}
-                  className="range w-20"
-                  style={filled(muted ? 0 : volume, 1)}
-                  aria-label="Volume"
+                <Btn onClick={next} label="Next">
+                  <TbPlayerTrackNextFilled />
+                </Btn>
+                <span className="hidden sm:block">
+                  <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
+                    <TbRepeat />
+                  </Btn>
+                </span>
+              </div>
+              <span
+                aria-hidden
+                className="mx-2 hidden h-5 w-px bg-separator sm:block"
+              />
+              <div className="hidden items-center gap-1 sm:flex">
+                <Volume
+                  volume={volume}
+                  setVolume={setVolume}
+                  muted={muted}
+                  setMuted={setMuted}
+                  iconSize={14}
+                  overContent
                 />
-              </span>
+                {!!pipApi() && (
+                  <Btn
+                    onClick={() => void openMiniPlayer().catch(() => {})}
+                    active={!!pip}
+                    label="Mini player"
+                  >
+                    <TbPictureInPicture />
+                  </Btn>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1338,11 +1331,16 @@ function Volume({
   setVolume,
   muted,
   setMuted,
+  iconSize = 20,
+  overContent,
 }: {
   volume: number;
   setVolume: (v: number) => void;
   muted: boolean;
   setMuted: (m: boolean) => void;
+  iconSize?: number;
+  /** Rises clear of the bottom bar, in the opaque popover material. */
+  overContent?: boolean;
 }) {
   const level = muted ? 0 : volume;
   return (
@@ -1359,13 +1357,17 @@ function Volume({
         label={muted ? "Unmute (M)" : "Mute (M)"}
       >
         {muted || volume === 0 ? (
-          <TbVolumeOff size={20} />
+          <TbVolumeOff size={iconSize} />
         ) : (
-          <TbVolume size={20} />
+          <TbVolume size={iconSize} />
         )}
       </Btn>
-      <div className="invisible absolute bottom-full left-1/2 -translate-x-1/2 pb-2 opacity-0 transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
-        <div className="relative h-32 w-9 rounded-full bg-black/60 backdrop-blur-xl ring-1 ring-white/10">
+      <div
+        className={`invisible absolute bottom-full left-1/2 -translate-x-1/2 opacity-0 transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100 ${overContent ? "pb-9" : "pb-2"}`}
+      >
+        <div
+          className={`relative h-32 w-9 rounded-full ring-1 ring-white/10 ${overContent ? "glass-thick shadow-2xl shadow-black/50" : "bg-black/60 backdrop-blur-xl"}`}
+        >
           <input
             type="range"
             min={0}
@@ -1880,19 +1882,23 @@ function FullView({
               return (
                 <li key={`${t.id}-${i}`}>
                   <button
-                    onClick={() => setIndex(i)}
+                    onClick={() =>
+                      current ? setPlaying(!playing) : setIndex(i)
+                    }
                     aria-current={current}
                     title={`${t.title} — ${t.artist}`}
-                    className={`flex w-full items-center gap-2 pl-3 pr-4 py-2 text-left transition hover:bg-white/10 ${
+                    className={`group flex w-full items-center gap-2 pl-3 pr-4 py-2 text-left transition hover:bg-white/10 ${
                       current ? "bg-white/15" : i < index ? "opacity-50" : ""
                     }`}
                   >
                     <span className="grid w-4 shrink-0 place-items-center text-[10px] tabular-nums text-white/60">
                       {current ? (
                         playing ? (
-                          <Logo size={14} className="spin-mark text-accent" />
+                          <span className="morph-out text-accent">
+                            <Logo size={14} className="spin-mark" />
+                          </span>
                         ) : (
-                          <TbPlayerPauseFilled className="text-accent" />
+                          <TbPlayerPlayFilled className="text-accent" />
                         )
                       ) : (
                         i + 1
