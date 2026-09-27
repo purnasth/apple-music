@@ -429,11 +429,27 @@ export async function decodeBackup(text: string, library: Track[]): Promise<Play
  * near-duplicate entries. Split on comma and ampersand only: "Sachin-Jigar" and
  * "Dan + Shay" are single acts, so hyphen and plus must be left alone.
  */
-export const artistsOf = (credit: string) =>
-  credit
+export const artistsOf = (credit: string) => {
+  const all = credit
     .split(/\s*[,&]\s*/)
     .map((a) => a.trim())
     .filter(Boolean);
+  const names = all.filter(
+    (a, i) => all.findIndex((b) => b.toLowerCase() === a.toLowerCase()) === i,
+  );
+  const lower = names.map((n) => n.toLowerCase());
+  // "Garvit - Priyansh, Garvit Soni & Priyansh Srivastava" credits the duo and
+  // its members: the joined act goes when each of its parts is credited alone.
+  return names.filter((name, i) => {
+    const parts = lower[i].split(/\s*[-–+]\s*/).filter(Boolean);
+    return (
+      parts.length < 2 ||
+      !parts.every((p) =>
+        lower.some((o, j) => j !== i && (o === p || o.startsWith(`${p} `))),
+      )
+    );
+  });
+};
 
 /**
  * Fisher-Yates. Repeatedly picking a random index — the obvious approach — can play the

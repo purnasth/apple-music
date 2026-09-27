@@ -1,16 +1,31 @@
 "use client";
 
-import { CSSProperties, RefObject, useEffect, useRef, useState } from "react";
+import {
+  CSSProperties,
+  Fragment,
+  RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   TbArrowsMaximize,
   TbArrowsShuffle,
+  TbChevronDown,
   TbChevronLeft,
+  TbDots,
+  TbDisc,
+  TbExternalLink,
+  TbLink,
+  TbPlaylistAdd,
+  TbShare3,
+  TbUser,
   TbMicrophone2,
   TbMusic,
   TbPlayerPauseFilled,
   TbPlayerPlayFilled,
-  TbPlayerSkipBackFilled,
-  TbPlayerSkipForwardFilled,
+  TbPlayerTrackPrevFilled,
+  TbPlayerTrackNextFilled,
   TbPlaylist,
   TbRepeat,
   TbVolume,
@@ -21,7 +36,9 @@ import { Logo } from "@/components/Logo";
 import { toast } from "@/lib/toast";
 import {
   Track,
+  artistsOf,
   audioSrc,
+  encodePlaylist,
   fmtTime,
   getSession,
   isPreview,
@@ -47,6 +64,8 @@ type Props = {
   setIndex: (i: number) => void;
   playing: boolean;
   setPlaying: (p: boolean) => void;
+  onAddTo: (t: Track) => void;
+  onGoTo: (kind: "artist" | "album", name: string) => void;
 };
 
 export default function Player({
@@ -55,6 +74,8 @@ export default function Player({
   setIndex,
   playing,
   setPlaying,
+  onAddTo,
+  onGoTo,
 }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const objectUrl = useRef<string | null>(null);
@@ -74,12 +95,14 @@ export default function Player({
   const [showQueue, setShowQueue] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
   const [noLyrics, setNoLyrics] = useState<string | null>(null);
+  const [lyricsChecked, setLyricsChecked] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
   const artLum = useLuminance(track?.artwork);
   const lyricsless = !!track && noLyrics === track.id;
+  const lyricsChecking = !!track && lyricsChecked !== track.id;
   const lyricsOn = showLyrics && !lyricsless;
 
   /**
@@ -116,12 +139,26 @@ export default function Player({
     // `ready` rejects when the transition is skipped (hidden tab, rapid toggle).
     document.startViewTransition(() => flushSync(change)).ready.catch(() => {});
   };
+  /** A track change cross-fades the whole view, cover into cover, rather than cutting. */
+  const go = (
+    i: number,
+    dir: "next" | "prev" = i > index ? "next" : "prev",
+  ) => {
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (i === index || calm || document.hidden || !document.startViewTransition)
+      return setIndex(i);
+    const root = document.documentElement;
+    root.dataset.vt = dir;
+    const t = document.startViewTransition(() => flushSync(() => setIndex(i)));
+    t.ready.catch(() => {});
+    t.finished.finally(() => delete root.dataset.vt);
+  };
   const toggleLyrics = () => {
     if (!lyricsless) transition(() => setShowLyrics(!showLyrics));
   };
 
   useEffect(() => {
-    if (!track || !full) return;
+    if (!track) return;
     let gone = false;
     getLyrics(track)
       .then((l) => {
@@ -130,10 +167,11 @@ export default function Player({
         if (document.querySelector(".stage[data-lyrics]")) transition(mark);
         else mark();
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => !gone && setLyricsChecked(track.id));
     return () => void (gone = true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track?.id, full]);
+  }, [track?.id]);
 
   /** The queue comes back with the view, but only where there is room for it. */
   const openFull = (withQueue: boolean) => {
@@ -158,7 +196,13 @@ export default function Player({
     const nxt = queue[path[path.indexOf(index) + 1]];
     if (nxt?.preview?.startsWith("/songs/")) fetch(nxt.preview).catch(() => {});
     if (showLyrics && nxt) getLyrics(nxt).catch(() => {});
-  }, [index, order, queue, showLyrics]);
+    // Both neighbours' covers, so a skip fades into artwork, not an empty square.
+    if (full)
+      for (const t of [nxt, queue[path[path.indexOf(index) - 1]]]) {
+        const art = t?.artworkLarge ?? t?.artwork;
+        if (art) document.createElement("img").src = art;
+      }
+  }, [index, order, queue, showLyrics, full]);
 
   /** Walk the play order, which is the shuffled one when shuffle is on. */
   const step = (delta: 1 | -1) => {
@@ -166,8 +210,8 @@ export default function Player({
     const path = order ?? queue.map((_, i) => i);
     const at = Math.max(path.indexOf(index), 0) + delta;
     if (at >= path.length)
-      return repeat ? setIndex(path[0]) : setPlaying(false);
-    setIndex(path[at < 0 ? path.length - 1 : at]);
+      return repeat ? go(path[0], "next") : setPlaying(false);
+    go(path[at < 0 ? path.length - 1 : at], delta > 0 ? "next" : "prev");
   };
 
   const next = () => step(1);
@@ -310,6 +354,8 @@ export default function Player({
       // Never steal a keystroke aimed at a field, or one the browser owns.
       if (el?.isContentEditable) return;
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(el?.tagName ?? "")) return;
+      // A modal sheet over the player owns its own keys (Escape closes it, not the view).
+      if (el?.closest("dialog[open]")) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       const a = audioRef.current;
@@ -470,7 +516,7 @@ export default function Player({
           track={track}
           queue={queue}
           index={index}
-          setIndex={setIndex}
+          setIndex={(i) => go(i)}
           loading={loading}
           time={time}
           dur={seekMax}
@@ -492,9 +538,17 @@ export default function Player({
           setShowQueue={setShowQueue}
           showLyrics={lyricsOn}
           lyricsless={lyricsless}
+          lyricsChecking={lyricsChecking}
           toggleLyrics={toggleLyrics}
           audio={audioRef}
           error={error}
+          onAddTo={() => onAddTo(track)}
+          queuePos={index + 1}
+          queueLen={queue.length}
+          onGoTo={(kind, name) => {
+            setFull(false);
+            onGoTo(kind, name);
+          }}
           onClose={() => setFull(false)}
         />
       )}
@@ -569,16 +623,12 @@ export default function Player({
                 <span className="text-[8px] sm:text-xxs tabular-nums text-label-3">
                   {fmtTime(time)}
                 </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={seekMax}
-                  value={time}
-                  step={0.1}
-                  onChange={(e) => seek(Number(e.target.value))}
-                  className="range flex-1"
-                  style={filled(time, seekMax, buffered)}
-                  aria-label="Seek"
+                <Seek
+                  time={time}
+                  dur={seekMax}
+                  buffered={buffered}
+                  onSeek={seek}
+                  className="flex-1"
                 />
                 <span className="text-[8px] sm:text-xxs tabular-nums text-label-3">
                   {fmtTime(seekMax)}
@@ -593,7 +643,7 @@ export default function Player({
                 </Btn>
               </span>
               <Btn onClick={prev} label="Previous">
-                <TbPlayerSkipBackFilled />
+                <TbPlayerTrackPrevFilled />
               </Btn>
               <button
                 onClick={() => setPlaying(!playing)}
@@ -603,14 +653,20 @@ export default function Player({
               >
                 {playing ? (
                   <span className="morph-out">
-                    <Logo size={20} live art={track.artwork} tone={markTone(artLum)} className="live-mark" />
+                    <Logo
+                      size={20}
+                      live
+                      art={track.artwork}
+                      tone={markTone(artLum)}
+                      className="live-mark"
+                    />
                   </span>
                 ) : (
-                  <TbPlayerPlayFilled size={18} className="ml-0.5" />
+                  <TbPlayerPlayFilled size={18} />
                 )}
               </button>
               <Btn onClick={next} label="Next">
-                <TbPlayerSkipForwardFilled />
+                <TbPlayerTrackNextFilled />
               </Btn>
               <span className="hidden sm:block">
                 <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
@@ -657,24 +713,27 @@ function Btn({
   active,
   label,
   unavailable,
+  busy,
 }: {
   onClick: () => void;
   children: React.ReactNode;
   active?: boolean;
   label: string;
   unavailable?: string | false;
+  busy?: string | false;
 }) {
   return (
     <button
       onClick={unavailable ? undefined : onClick}
       aria-label={unavailable ? `${label}: ${unavailable}` : label}
-      title={unavailable || label}
+      title={unavailable || busy || label}
+      aria-busy={busy ? true : undefined}
       aria-pressed={unavailable ? undefined : active}
       aria-disabled={unavailable ? true : undefined}
       className={`grid h-8 w-8 place-items-center rounded-full text-sm transition ${
         unavailable
           ? "cursor-not-allowed text-label-2 opacity-35"
-          : `hover:bg-fill active:scale-95 ${active ? "text-accent" : "text-label-2 hover:text-label"}`
+          : `hover:bg-fill active:scale-95 ${active ? "text-accent" : "text-label-2 hover:text-label"} ${busy ? "animate-pulse" : ""}`
       }`}
     >
       {children}
@@ -682,8 +741,398 @@ function Btn({
   );
 }
 
+/** Timeline that shows the time under the pointer while hovering. */
+function Seek({
+  time,
+  dur,
+  buffered,
+  onSeek,
+  light,
+  className = "",
+}: {
+  time: number;
+  dur: number;
+  buffered: number;
+  onSeek: (t: number) => void;
+  light?: boolean;
+  className?: string;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  return (
+    <div className={`relative flex ${className}`}>
+      {hover !== null && dur > 0 && (
+        <span
+          className="pointer-events-none absolute bottom-full mb-1.5 -translate-x-1/2 rounded-md bg-black/80 px-1.5 py-0.5 text-xxs tabular-nums text-white"
+          style={{ left: `${hover * 100}%` }}
+        >
+          {fmtTime(hover * dur)}
+        </span>
+      )}
+      <input
+        type="range"
+        min={0}
+        max={dur}
+        value={time}
+        step={0.1}
+        onChange={(e) => onSeek(Number(e.target.value))}
+        onPointerMove={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setHover(Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1));
+        }}
+        onPointerLeave={() => setHover(null)}
+        className={`range w-full ${light ? "range-light" : ""}`}
+        style={filled(time, dur, buffered)}
+        aria-label="Seek"
+      />
+    </div>
+  );
+}
+
+/** Mute button that opens a vertical volume slider on hover or focus. */
+function Volume({
+  volume,
+  setVolume,
+  muted,
+  setMuted,
+}: {
+  volume: number;
+  setVolume: (v: number) => void;
+  muted: boolean;
+  setMuted: (m: boolean) => void;
+}) {
+  const level = muted ? 0 : volume;
+  return (
+    <div
+      className="group relative"
+      onWheel={(e) => {
+        setMuted(false);
+        setVolume(Math.min(Math.max(level - Math.sign(e.deltaY) * 0.05, 0), 1));
+      }}
+    >
+      <Btn
+        onClick={() => setMuted(!muted)}
+        active={muted}
+        label={muted ? "Unmute (M)" : "Mute (M)"}
+      >
+        {muted || volume === 0 ? (
+          <TbVolumeOff size={20} />
+        ) : (
+          <TbVolume size={20} />
+        )}
+      </Btn>
+      <div className="invisible absolute bottom-full left-1/2 -translate-x-1/2 pb-2 opacity-0 transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
+        <div className="relative h-32 w-9 rounded-full bg-black/60 backdrop-blur-xl ring-1 ring-white/10">
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={muted ? 0 : volume}
+            onChange={(e) => {
+              setMuted(false);
+              setVolume(Number(e.target.value));
+            }}
+            className="range range-light absolute left-1/2 top-1/2 w-24 -translate-x-1/2 -translate-y-1/2 -rotate-90"
+            style={filled(muted ? 0 : volume, 1)}
+            aria-label="Volume"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One line; when it doesn't fit it loops leftwards, a copy trailing a gap behind, the way Apple Music and Spotify scroll a long title. */
+function Marquee({ text }: { text: string }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const first = el.firstElementChild as HTMLElement;
+    const measure = () =>
+      setWidth(first.offsetWidth > el.clientWidth ? first.offsetWidth : 0);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text]);
+
+  const gap = 40;
+  const dist = width + gap;
+  return (
+    <span
+      ref={box}
+      title={text}
+      data-overflow={width > 0 || undefined}
+      className="marquee"
+      style={
+        {
+          "--gap": `${gap}px`,
+          "--shift": `-${dist}px`,
+          // 30px/s while moving, which is the last 80% of each cycle.
+          "--marquee-time": `${dist / 30 / 0.8}s`,
+        } as CSSProperties
+      }
+    >
+      <span>{text}</span>
+      {width > 0 && <span aria-hidden>{text}</span>}
+    </span>
+  );
+}
+
+/** The ⋯ menu beside the title: what you can do with this song, and the details the stage leaves out. */
+function TrackMenu({
+  track,
+  dur,
+  queuePos,
+  queueLen,
+  onAddTo,
+  onGoTo,
+}: {
+  track: Track;
+  dur: number;
+  queuePos: number;
+  queueLen: number;
+  onAddTo: () => void;
+  onGoTo: (kind: "artist" | "album", name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // Opens toward whichever half of the screen has more room, capped to fit it.
+  const [room, setRoom] = useState({ up: false, max: 0 });
+  const [pickArtist, setPickArtist] = useState(false);
+  const [lyrics, setLyrics] = useState<string | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    // Capture, and stop it there, so Escape shuts the menu rather than the full view.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    let gone = false;
+    getLyrics(track)
+      .then((l) => {
+        if (gone) return;
+        setLyrics(
+          !l
+            ? "No lyrics"
+            : "lines" in l
+              ? track.words
+                ? "Word-synced lyrics"
+                : "Synced lyrics"
+              : "Lyrics",
+        );
+      })
+      .catch(() => {});
+    return () => {
+      gone = true;
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open, track]);
+
+  /** #s= is a song link: it opens this one song in the player, not a playlist. */
+  const link = async () =>
+    `${location.origin}${location.pathname}#s=${await encodePlaylist(track.title, [track])}`;
+  const label = `${track.title} — ${track.artist}`;
+  const refused = () =>
+    toast.warning("This song can't be shared", {
+      description: "Imported files stay on the device that imported them.",
+    });
+
+  const share = async () => {
+    if (track.local) return refused();
+    try {
+      const url = await link();
+      if (navigator.share) return await navigator.share({ title: label, url });
+      await navigator.clipboard.writeText(url);
+      toast.success("Song link copied", { description: label });
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") return;
+      toast.error("Could not share the song", { description: label });
+    }
+  };
+
+  const copy = async () => {
+    if (track.local) return refused();
+    try {
+      await navigator.clipboard.writeText(await link());
+      toast.success("Song link copied", { description: label });
+    } catch {
+      toast.error("Could not copy the link", {
+        description: "Clipboard access was refused.",
+      });
+    }
+  };
+
+  const chips = [
+    fmtTime(dur),
+    isPreview(track)
+      ? "30s preview"
+      : track.local
+        ? "On this device"
+        : "Full track",
+    lyrics,
+    queueLen > 1 && `${queuePos} of ${queueLen} in queue`,
+    track.folder,
+  ].filter((c): c is string => !!c);
+  const artists = artistsOf(track.artist);
+
+  const item = (
+    icon: React.ReactNode,
+    label: string,
+    run: () => void,
+    aside?: string,
+  ) => (
+    <button
+      key={label + (aside ?? "")}
+      role="menuitem"
+      onClick={() => {
+        setOpen(false);
+        run();
+      }}
+      className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm transition hover:bg-white/10"
+    >
+      <span className="shrink-0 text-white/70">{icon}</span>
+      <span className="min-w-0">
+        {label}
+        {aside && (
+          <span className="block break-words text-xs text-white/50">
+            {aside}
+          </span>
+        )}
+      </span>
+    </button>
+  );
+  const rule = <div className="mx-2.5 my-1 h-px bg-white/10" />;
+
+  return (
+    <div ref={box} className="relative shrink-0">
+      <button
+        onClick={() => {
+          const r = box.current!.getBoundingClientRect();
+          const below = innerHeight - r.bottom;
+          const up = r.top > below;
+          setRoom({ up, max: (up ? r.top : below) - 16 });
+          setPickArtist(false);
+          setOpen(!open);
+        }}
+        aria-label="More"
+        title="More"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="grid h-9 w-9 place-items-center rounded-full bg-white/15 backdrop-blur-xl transition hover:bg-white/25 active:scale-95"
+      >
+        <TbDots size={20} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{ maxHeight: room.max }}
+          className={`absolute right-0 z-30 w-72 overflow-y-auto overscroll-contain rounded-2xl ${room.up ? "bottom-full mb-2" : "top-full mt-2"} bg-black/75 text-left shadow-2xl ring-1 ring-white/10 backdrop-blur-2xl`}
+        >
+          <div className="flex flex-wrap gap-1.5 border-b border-white/10 px-4 py-3">
+            {chips.map((c) => (
+              <span
+                key={c}
+                className="max-w-full break-words rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium tabular-nums text-white/80"
+              >
+                {c}
+              </span>
+            ))}
+          </div>
+          <div className="p-1.5">
+            {item(<TbPlaylistAdd size={18} />, "Add to a Playlist…", onAddTo)}
+            {rule}
+            {item(<TbShare3 size={18} />, "Share Song…", share)}
+            {item(<TbLink size={18} />, "Copy Song Link", copy)}
+            {rule}
+            {track.album &&
+              item(
+                <TbDisc size={18} />,
+                "Go to Album",
+                () => onGoTo("album", track.album),
+                track.album,
+              )}
+            {artists.length === 1 ? (
+              item(
+                <TbUser size={18} />,
+                "Go to Artist",
+                () => onGoTo("artist", artists[0]),
+                artists[0],
+              )
+            ) : (
+              <>
+                <button
+                  role="menuitem"
+                  aria-expanded={pickArtist}
+                  onClick={() => setPickArtist(!pickArtist)}
+                  className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm transition hover:bg-white/10"
+                >
+                  <span className="shrink-0 text-white/70">
+                    <TbUser size={18} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    Go to Artist
+                    <span className="block text-xs text-white/50">
+                      {artists.length} artists
+                    </span>
+                  </span>
+                  <TbChevronDown
+                    size={16}
+                    className={`shrink-0 text-white/50 transition ${pickArtist ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {pickArtist &&
+                  artists.map((name) => (
+                    <button
+                      key={name}
+                      role="menuitem"
+                      onClick={() => {
+                        setOpen(false);
+                        onGoTo("artist", name);
+                      }}
+                      className="block w-full break-words rounded-lg py-1.5 pl-[2.625rem] pr-2.5 text-left text-sm text-white/85 transition hover:bg-white/10"
+                    >
+                      {name}
+                    </button>
+                  ))}
+              </>
+            )}
+            {track.appleUrl && (
+              <>
+                {rule}
+                {item(
+                  <TbExternalLink size={18} />,
+                  "Listen on Apple Music",
+                  () =>
+                    window.open(
+                      track.appleUrl,
+                      "_blank",
+                      "noopener,noreferrer",
+                    ),
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Brightness scale that keeps the cover-filled mark visible on the light play button. */
-const markTone = (lum: number | null) => (lum === null ? 0.6 : Math.min(1, 0.3 / lum));
+const markTone = (lum: number | null) =>
+  lum === null ? 0.6 : Math.min(1, 0.3 / lum);
 
 /** Average luminance (0–1) of an image, or null when it can't be read (no CORS, no art). */
 function useLuminance(src?: string) {
@@ -743,9 +1192,14 @@ function FullView({
   setShowQueue,
   showLyrics,
   lyricsless,
+  lyricsChecking,
   toggleLyrics,
   audio,
   error,
+  onAddTo,
+  queuePos,
+  queueLen,
+  onGoTo,
   onClose,
 }: {
   track: Track;
@@ -773,14 +1227,29 @@ function FullView({
   setShowQueue: (s: boolean) => void;
   showLyrics: boolean;
   lyricsless: boolean;
+  lyricsChecking: boolean;
   toggleLyrics: () => void;
   audio: RefObject<HTMLAudioElement | null>;
   error: string | null;
+  onAddTo: () => void;
+  queuePos: number;
+  queueLen: number;
+  onGoTo: (kind: "artist" | "album", name: string) => void;
   onClose: () => void;
 }) {
   const art = track.artworkLarge ?? track.artwork;
   const lum = useLuminance(art);
-  const dim = Math.min((lum === null ? 0.45 : 0.25 + lum * 0.5) + (showLyrics ? 0.2 : 0), 0.85);
+  const [remaining, setRemaining] = useState(false);
+  const swipe = useRef<{
+    x: number;
+    y: number;
+    top: boolean;
+    cover: boolean;
+  } | null>(null);
+  const dim = Math.min(
+    (lum === null ? 0.45 : 0.25 + lum * 0.5) + (showLyrics ? 0.2 : 0),
+    0.85,
+  );
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-canvas text-white">
@@ -899,11 +1368,44 @@ function FullView({
         </button>
 
         <div
+          onTouchStart={(e) => {
+            const t = e.touches[0];
+            const el = e.target as HTMLElement;
+            // Not a scrub, a lyrics scroll or a menu. Down closes only from the
+            // top of the page; sideways skips only on the cover.
+            swipe.current = el.closest("input, .stage-lyrics, [role=menu]")
+              ? null
+              : {
+                  x: t.clientX,
+                  y: t.clientY,
+                  top: e.currentTarget.scrollTop <= 0,
+                  cover: !!el.closest(".stage-art"),
+                };
+          }}
+          onTouchEnd={(e) => {
+            const s = swipe.current;
+            swipe.current = null;
+            if (!s) return;
+            const t = e.changedTouches[0];
+            const dx = t.clientX - s.x;
+            const dy = t.clientY - s.y;
+            if (s.top && dy > 100 && dy > Math.abs(dx) * 2) return onClose();
+            if (
+              s.cover &&
+              Math.abs(dx) > 60 &&
+              Math.abs(dx) > Math.abs(dy) * 1.5
+            )
+              return dx < 0 ? next() : prev();
+          }}
           className={`flex min-w-0 flex-1 flex-col items-center px-4 pb-10 transition-transform duration-300 ease-out sm:px-6 sm:pb-16 sm:pt-16 ${
             showLyrics ? "overflow-hidden pt-16" : "overflow-y-auto pt-10"
           } ${showQueue ? "lg:translate-x-40" : "translate-x-0"}`}
         >
-          <div className="stage" data-lyrics={showLyrics || undefined}>
+          <div
+            className="stage"
+            data-lyrics={showLyrics || undefined}
+            data-paused={!playing || undefined}
+          >
             <div className="stage-id">
               {art ? (
                 <img
@@ -918,22 +1420,28 @@ function FullView({
               )}
 
               <div className="stage-meta">
-                <h2 className="stage-title truncate">{track.title}</h2>
-                <p className="mt-1 truncate text-sm text-white/85">
-                  {track.artist}
-                  {isPreview(track) ? " · 30s preview" : ""}
-                </p>
-                {track.album && (
-                  <p className="stage-aside mt-0.5 truncate text-xs text-white/70">
-                    {track.album}
+                <div className="min-w-0 flex-1">
+                  <h2 className="stage-title">
+                    <Marquee text={track.title} />
+                  </h2>
+                  <p className="mt-0.5 text-sm text-white/75">
+                    <Marquee text={`${track.artist} - ${track.album}`} />
                   </p>
-                )}
-                {loading && (
-                  <p className="stage-aside mt-2 text-xs text-white/75">
-                    Loading…
-                  </p>
-                )}
-                {error && <p className="mt-2 text-sm text-accent">{error}</p>}
+                  {loading && (
+                    <p className="stage-aside mt-1 text-xs text-white/75">
+                      Loading…
+                    </p>
+                  )}
+                  {error && <p className="mt-1 text-sm text-accent">{error}</p>}
+                </div>
+                <TrackMenu
+                  track={track}
+                  dur={dur}
+                  queuePos={queuePos}
+                  queueLen={queueLen}
+                  onAddTo={onAddTo}
+                  onGoTo={onGoTo}
+                />
               </div>
             </div>
 
@@ -943,87 +1451,79 @@ function FullView({
 
             <div className="stage-ctl">
               <div className="mt-5 flex w-full items-center gap-3">
-                <span className="w-10 text-right text-xs tabular-nums text-white/80">
+                <span className="text-right text-xs tabular-nums text-white/80">
                   {fmtTime(time)}
                 </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={dur}
-                  value={time}
-                  step={0.1}
-                  onChange={(e) => onSeek(Number(e.target.value))}
-                  className="range range-light flex-1"
-                  style={filled(time, dur, buffered)}
-                  aria-label="Seek"
+                <Seek
+                  time={time}
+                  dur={dur}
+                  buffered={buffered}
+                  onSeek={onSeek}
+                  light
+                  className="flex-1"
                 />
-                <span className="w-10 text-xs tabular-nums text-white/80">
-                  {fmtTime(dur)}
-                </span>
+                <button
+                  onClick={() => setRemaining(!remaining)}
+                  title={remaining ? "Show duration" : "Show time remaining"}
+                  className="text-xs tabular-nums text-white/80 transition hover:text-white"
+                >
+                  {remaining
+                    ? `-${fmtTime(Math.max(dur - time, 0))}`
+                    : fmtTime(dur)}
+                </button>
               </div>
 
-              <div className="mt-5 flex items-center gap-5">
-                <Btn onClick={toggleShuffle} active={shuffle} label="Shuffle">
-                  <TbArrowsShuffle size={18} />
-                </Btn>
-                <Btn onClick={prev} label="Previous">
-                  <TbPlayerSkipBackFilled size={18} />
-                </Btn>
-                <button
-                  onClick={() => setPlaying(!playing)}
-                  aria-label={playing ? "Pause" : "Play"}
-                  title={playing ? "Pause" : "Play"}
-                  className="group grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 transition hover:scale-105 active:scale-95"
-                >
-                  {playing ? (
-                    <span className="morph-out">
-                      <Logo size={28} live art={art} tone={markTone(lum)} className="live-mark" />
-                    </span>
-                  ) : (
-                    <TbPlayerPlayFilled size={22} className="ml-1" />
-                  )}
-                </button>
-                <Btn onClick={next} label="Next">
-                  <TbPlayerSkipForwardFilled size={18} />
-                </Btn>
-                <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
-                  <TbRepeat size={18} />
-                </Btn>
+              <div className="mt-5 flex w-full items-center justify-between">
                 <Btn
                   onClick={toggleLyrics}
                   active={showLyrics}
                   label="Lyrics"
                   unavailable={lyricsless && "No lyrics for this song"}
+                  busy={lyricsChecking && "Looking for lyrics…"}
                 >
-                  <TbMicrophone2 size={18} />
+                  <TbMicrophone2 size={20} />
                 </Btn>
-              </div>
-
-              <span className="mt-6 hidden items-center gap-2 sm:flex">
-                <button
-                  onClick={() => setMuted(!muted)}
-                  aria-label={muted ? "Unmute" : "Mute"}
-                  title={muted ? "Unmute (M)" : "Mute (M)"}
-                  aria-pressed={muted}
-                  className="shrink-0 text-white/80 transition hover:text-white"
-                >
-                  {muted ? <TbVolumeOff size={16} /> : <TbVolume size={16} />}
-                </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={muted ? 0 : volume}
-                  onChange={(e) => {
-                    setMuted(false);
-                    setVolume(Number(e.target.value));
-                  }}
-                  className="range range-light w-40"
-                  style={filled(muted ? 0 : volume, 1)}
-                  aria-label="Volume"
+                <div className="flex items-center gap-2 sm:gap-5">
+                  <Btn onClick={toggleShuffle} active={shuffle} label="Shuffle">
+                    <TbArrowsShuffle size={20} />
+                  </Btn>
+                  <Btn onClick={prev} label="Previous">
+                    <TbPlayerTrackPrevFilled size={20} />
+                  </Btn>
+                  <button
+                    onClick={() => setPlaying(!playing)}
+                    aria-label={playing ? "Pause" : "Play"}
+                    title={playing ? "Pause" : "Play"}
+                    className="group grid h-16 w-16 place-items-center rounded-full bg-white text-black shadow-lg shadow-black/30 transition hover:scale-105 active:scale-95"
+                  >
+                    {playing ? (
+                      <span className="morph-out">
+                        <Logo
+                          size={32}
+                          live
+                          art={art}
+                          tone={markTone(lum)}
+                          className="live-mark"
+                        />
+                      </span>
+                    ) : (
+                      <TbPlayerPlayFilled size={26} />
+                    )}
+                  </button>
+                  <Btn onClick={next} label="Next">
+                    <TbPlayerTrackNextFilled size={20} />
+                  </Btn>
+                  <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
+                    <TbRepeat size={20} />
+                  </Btn>
+                </div>
+                <Volume
+                  volume={volume}
+                  setVolume={setVolume}
+                  muted={muted}
+                  setMuted={setMuted}
                 />
-              </span>
+              </div>
             </div>
           </div>
         </div>
