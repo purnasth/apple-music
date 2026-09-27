@@ -5,6 +5,7 @@ import {
   Fragment,
   RefObject,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -100,7 +101,7 @@ export default function Player({
   const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
-  const artLum = useLuminance(track?.artwork);
+  const artLum = useArtTone(track?.artwork).lum;
   const lyricsless = !!track && noLyrics === track.id;
   const lyricsChecking = !!track && lyricsChecked !== track.id;
   const lyricsOn = showLyrics && !lyricsless;
@@ -788,6 +789,101 @@ function Seek({
   );
 }
 
+/** Loop heights from the track id: the same song always draws the same line. */
+function waveHeights(seed: string, n: number) {
+  let h = 2166136261;
+  for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  const rand = () => {
+    h = Math.imul(h ^ (h >>> 15), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return ((h ^= h >>> 16) >>> 0) / 4294967296;
+  };
+  const raw = Array.from({ length: n }, rand);
+  // Neighbours wrap around, so the pattern tiles without a seam.
+  return raw.map((v, i) => {
+    const smooth = (raw.at(i - 1)! + v * 6 + raw[(i + 1) % n]) / 8;
+    return 0.3 + 0.7 * smooth ** 1.2;
+  });
+}
+
+/**
+ * The full view's horizon: one continuous line of tall, narrow loops that flows
+ * right to left while the song plays and settles when it pauses. Decoration only.
+ */
+function Horizon({
+  seed,
+  playing,
+  tint,
+}: {
+  seed: string;
+  playing: boolean;
+  tint: string | null;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Quieter on a phone, where the same band would crowd the controls.
+  const small = w > 0 && w < 640;
+  const H = small ? 40 : 64;
+  const step = small ? 5 : 6;
+  // An even loop count, so each copy of the pattern starts on an upstroke.
+  const n = Math.floor(w / step / 2) * 2;
+  const period = n * step;
+  const d = useMemo(() => {
+    if (!n) return "";
+    const mid = H / 2;
+    const r = step / 2;
+    const heights = waveHeights(seed, n);
+    let path = `M0 ${mid}`;
+    // Three copies: the view slides one period, and the width can run a loop past it.
+    for (let i = 0; i < n * 3; i++) {
+      const x = i * step;
+      const reach = Math.max(heights[i % n] * (mid - 2), r + 0.5);
+      path +=
+        i % 2 === 0
+          ? ` L${x} ${mid - reach + r} A${r} ${r} 0 0 1 ${x + step} ${mid - reach + r}`
+          : ` L${x} ${mid + reach - r} A${r} ${r} 0 0 0 ${x + step} ${mid + reach - r}`;
+    }
+    return path;
+  }, [seed, n, H, step]);
+
+  return (
+    <div
+      ref={box}
+      aria-hidden
+      data-playing={playing || undefined}
+      className="horizon pointer-events-none absolute inset-x-0 bottom-0"
+      style={
+        {
+          height: H,
+          "--period": `-${period}px`,
+          "--flow-time": `${period / 40}s`,
+          "--tint": tint ?? "#fff",
+        } as CSSProperties
+      }
+    >
+      {/* The line, then the same line brighter, shown only under a travelling band of light. */}
+      <div className="horizon-line">
+        <svg width={period * 3} height={H}>
+          <path d={d} />
+        </svg>
+      </div>
+      <div className="horizon-line horizon-shine">
+        <svg width={period * 3} height={H}>
+          <path d={d} />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 /** Mute button that opens a vertical volume slider on hover or focus. */
 function Volume({
   volume,
@@ -1134,9 +1230,16 @@ function TrackMenu({
 const markTone = (lum: number | null) =>
   lum === null ? 0.6 : Math.min(1, 0.3 / lum);
 
-/** Average luminance (0–1) of an image, or null when it can't be read (no CORS, no art). */
-function useLuminance(src?: string) {
-  const [lum, setLum] = useState<number | null>(null);
+/**
+ * Reads an image once: its average luminance (0–1), and its most vivid colour
+ * lifted to a soft, bright tint (null when the art is greyscale). Both are null
+ * when the image can't be read (no CORS, no art).
+ */
+function useArtTone(src?: string) {
+  const [tone, setTone] = useState<{
+    lum: number | null;
+    tint: string | null;
+  }>({ lum: null, tint: null });
   useEffect(() => {
     if (!src) return;
     const img = document.createElement("img");
@@ -1149,20 +1252,38 @@ function useLuminance(src?: string) {
         g.drawImage(img, 0, 0, 8, 8);
         const d = g.getImageData(0, 0, 8, 8).data;
         let sum = 0;
-        for (let i = 0; i < d.length; i += 4)
+        let best = { s: 0, h: 0 };
+        for (let i = 0; i < d.length; i += 4) {
+          const [r, gr, b] = [d[i] / 255, d[i + 1] / 255, d[i + 2] / 255];
           sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-        setLum(sum / 64 / 255);
+          const max = Math.max(r, gr, b);
+          const span = max - Math.min(r, gr, b);
+          // Chroma, so a dark muddy pixel does not outrank a clear colour.
+          if (span > best.s) {
+            const h =
+              max === r
+                ? ((gr - b) / span) % 6
+                : max === gr
+                  ? (b - r) / span + 2
+                  : (r - gr) / span + 4;
+            best = { s: span, h: (h * 60 + 360) % 360 };
+          }
+        }
+        setTone({
+          lum: sum / 64 / 255,
+          tint: best.s > 0.15 ? `hsl(${Math.round(best.h)} 75% 72%)` : null,
+        });
       } catch {
-        setLum(null);
+        setTone({ lum: null, tint: null });
       }
     };
-    img.onerror = () => setLum(null);
+    img.onerror = () => setTone({ lum: null, tint: null });
     img.src = src;
     return () => {
       img.onload = img.onerror = null;
     };
   }, [src]);
-  return lum;
+  return tone;
 }
 
 /** Fills the page (not the browser) — the cover blurred behind itself, queue on the left. */
@@ -1238,7 +1359,7 @@ function FullView({
   onClose: () => void;
 }) {
   const art = track.artworkLarge ?? track.artwork;
-  const lum = useLuminance(art);
+  const { lum, tint } = useArtTone(art);
   const [remaining, setRemaining] = useState(false);
   const swipe = useRef<{
     x: number;
@@ -1272,6 +1393,7 @@ function FullView({
         className="pointer-events-none absolute inset-0 transition-colors duration-300 ease-glide"
         style={{ backgroundColor: `rgb(0 0 0 / ${dim})` }}
       />
+      <Horizon key={track.id} seed={track.id} playing={playing} tint={tint} />
 
       <button
         onClick={onClose}
@@ -1397,8 +1519,9 @@ function FullView({
             )
               return dx < 0 ? next() : prev();
           }}
-          className={`flex min-w-0 flex-1 flex-col items-center px-4 pb-10 transition-transform duration-300 ease-out sm:px-6 sm:pb-16 sm:pt-16 ${
-            showLyrics ? "overflow-hidden pt-16" : "overflow-y-auto pt-10"
+          className={`flex min-w-0 flex-1 flex-col items-center px-4 transition-transform duration-300 ease-out sm:px-6 sm:pb-24 sm:pt-16 ${
+            // Lyrics push the controls to the foot; this keeps them above the horizon.
+            showLyrics ? "overflow-hidden pb-14 pt-16" : "overflow-y-auto pb-10 pt-10"
           } ${showQueue ? "lg:translate-x-40" : "translate-x-0"}`}
         >
           <div

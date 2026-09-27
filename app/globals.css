@@ -357,6 +357,81 @@ nav,
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
 }
 
+/* The full view's horizon: a waveform in the cover's colour, flowing right to
+   left while playing, with a band of light travelling along it and a slow
+   breath in brightness. Paused, it freezes where it is and dims to rest; the
+   shape is never scaled, so the loops stay round in both states. */
+.horizon {
+  overflow: hidden;
+  mask-image: linear-gradient(to right, transparent, #000 15%, #000 85%, transparent);
+}
+.horizon-line {
+  position: absolute;
+  inset: 0;
+  opacity: 0.1;
+  transition: opacity 900ms var(--ease-glide);
+}
+.horizon path {
+  fill: none;
+  stroke: var(--tint);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.horizon svg {
+  animation: horizon-flow var(--flow-time) linear infinite paused;
+}
+.horizon[data-playing] svg {
+  animation-play-state: running;
+}
+.horizon[data-playing] .horizon-line {
+  animation: horizon-breathe 3.2s ease-in-out infinite alternate;
+}
+.horizon-shine {
+  opacity: 0;
+  mask-image: linear-gradient(to right, transparent, #000 50%, transparent);
+  mask-size: 35% 100%;
+  mask-repeat: no-repeat;
+}
+.horizon[data-playing] .horizon-shine {
+  opacity: 0.55;
+  animation: horizon-shine 6s ease-in-out infinite;
+}
+@keyframes horizon-flow {
+  to {
+    translate: var(--period) 0;
+  }
+}
+@keyframes horizon-breathe {
+  from {
+    opacity: 0.16;
+  }
+  to {
+    opacity: 0.3;
+  }
+}
+@keyframes horizon-shine {
+  from {
+    mask-position: -60% 0;
+  }
+  to {
+    mask-position: 160% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .horizon svg,
+  .horizon[data-playing] .horizon-line,
+  .horizon[data-playing] .horizon-shine {
+    animation: none;
+  }
+  .horizon[data-playing] .horizon-line {
+    opacity: 0.22;
+  }
+  .horizon-shine {
+    display: none;
+  }
+}
+
 /* Long titles loop leftwards the way Apple Music and Spotify scroll them: a
    pause, then a steady drift until the trailing copy lands where the first
    began, so the jump back to the start is invisible. The left fade only shows
