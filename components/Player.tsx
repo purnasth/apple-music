@@ -335,13 +335,16 @@ export default function Player({
     graph.current?.ctx.resume().catch(() => {});
   }, [full, pip, playing]);
 
+  // The <audio> only mounts once there is a track, after the restored settings
+  // first run, so they are applied again when it appears.
+  const hasAudio = !!track;
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
-  }, [volume]);
+  }, [volume, hasAudio]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.muted = muted;
-  }, [muted]);
+  }, [muted, hasAudio]);
 
   // Persist the session as it changes, so the next visit resumes it (Spotify-style).
   // Playback position goes through saveSessionTime instead — see onTimeUpdate.
