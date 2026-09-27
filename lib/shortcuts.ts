@@ -6,9 +6,11 @@
  * pauses everywhere, arrows seek, Escape leaves the full view. Where they
  * disagree we follow YouTube, because its bindings are the ones people arrive
  * already knowing — J/L for the ten-second jumps, Shift+N and Shift+P to walk
- * the queue, digits for the tenths, M to mute. Spotify's own transport bindings
- * are all Ctrl/Cmd-chorded, which on the web collides with browser navigation,
- * so they are deliberately not copied.
+ * the queue, digits for the tenths, M to mute, F for the big view and I for the
+ * miniplayer. Q for the queue is Spotify's letter, minus its chord. Spotify's
+ * transport bindings and Apple Music's MiniPlayer ones are Ctrl/Cmd-chorded,
+ * which on the web collides with browser navigation, so they are deliberately
+ * not copied. The same keys work while the mini player has focus.
  *
  * Grouped rather than flat so the sheet can lay them out in columns instead of
  * one long striped list. The order is the layout: CSS balances the four blocks
@@ -31,10 +33,11 @@ export const SHORTCUT_GROUPS: {
   {
     title: "View",
     items: [
-      { keys: ["I"], label: "Full view, queue and all" },
-      { keys: ["F"], label: "Full screen, queue hidden" },
+      { keys: ["F"], label: "Full view" },
+      { keys: ["Q"], label: "Queue" },
       { keys: ["Y"], label: "Lyrics" },
-      { keys: ["Esc"], label: "Close the lyrics, then the view" },
+      { keys: ["I"], label: "Mini player" },
+      { keys: ["Esc"], label: "Close" },
       { keys: ["/"], label: "Jump to search" },
       { keys: ["?"], label: "Show this list" },
     ],

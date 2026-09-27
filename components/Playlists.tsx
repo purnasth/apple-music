@@ -19,6 +19,7 @@ import {
   TbUpload,
   TbX,
 } from "react-icons/tb";
+import { Logo } from "@/components/Logo";
 import { toast } from "@/lib/toast";
 import {
   Track,
@@ -316,6 +317,9 @@ export function PlaylistsView({
   onBackup,
   onRestore,
   onPlay,
+  queue,
+  playing,
+  onToggle,
 }: {
   playlists: Playlists;
   shared: Detail | null;
@@ -328,7 +332,15 @@ export function PlaylistsView({
   onBackup: () => void;
   onRestore: (file: File) => void;
   onPlay: (tracks: Track[], shuffle: boolean, what: string) => void;
+  queue: Track[];
+  playing: boolean;
+  onToggle: () => void;
 }) {
+  // Shuffle reorders the queue, so it is matched as a set, not a sequence.
+  const queued = new Set(queue.map((t) => t.id));
+  const isQueue = (tracks: Track[]) =>
+    tracks.length === queue.length && tracks.every((t) => queued.has(t.id));
+
   if (detail)
     return (
       <PlaylistDetail
@@ -379,6 +391,9 @@ export function PlaylistsView({
             badge="Shared with you"
             onOpen={() => open(shared)}
             onPlay={() => onPlay(shared.tracks, false, `“${shared.name}”`)}
+            current={isQueue(shared.tracks)}
+            playing={playing}
+            onToggle={onToggle}
           />
         )}
         {names.map((n) => (
@@ -388,6 +403,9 @@ export function PlaylistsView({
             tracks={playlists[n]}
             onOpen={() => open({ name: n, tracks: playlists[n] })}
             onPlay={() => onPlay(playlists[n], false, `“${n}”`)}
+            current={isQueue(playlists[n])}
+            playing={playing}
+            onToggle={onToggle}
           />
         ))}
       </div>
@@ -401,12 +419,19 @@ function Card({
   badge,
   onOpen,
   onPlay,
+  current,
+  playing,
+  onToggle,
 }: {
   name: string;
   tracks: Track[];
   badge?: string;
   onOpen: () => void;
   onPlay: () => void;
+  /** This playlist is the queue: the button pauses and resumes it instead. */
+  current: boolean;
+  playing: boolean;
+  onToggle: () => void;
 }) {
   return (
     <div className="group">
@@ -424,12 +449,18 @@ function Card({
         )}
         {!!tracks.length && (
           <button
-            onClick={onPlay}
-            aria-label={`Play ${name}`}
-            title={`Play ${name}`}
-            className="absolute bottom-2 right-2 grid h-9 w-9 place-items-center rounded-full bg-accent text-white opacity-0 shadow-lg shadow-black/40 transition hover:brightness-110 focus-visible:opacity-100 active:scale-95 group-hover:opacity-100"
+            onClick={current ? onToggle : onPlay}
+            aria-label={`${current && playing ? "Pause" : "Play"} ${name}`}
+            title={`${current && playing ? "Pause" : "Play"} ${name}`}
+            className={`absolute bottom-2 right-2 grid h-9 w-9 place-items-center rounded-full bg-accent text-white shadow-lg shadow-black/40 transition hover:brightness-110 focus-visible:opacity-100 active:scale-95 group-hover:opacity-100 ${current ? "opacity-100" : "opacity-0"}`}
           >
-            <TbPlayerPlayFilled size={14} className="ml-0.5" />
+            {current && playing ? (
+              <span className="morph-out">
+                <Logo size={16} className="spin-mark" />
+              </span>
+            ) : (
+              <TbPlayerPlayFilled size={14} className="ml-0.5" />
+            )}
           </button>
         )}
       </div>

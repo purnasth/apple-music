@@ -1046,6 +1046,9 @@ export default function Home() {
             onBackup={backup}
             onRestore={restore}
             onPlay={playAll}
+            queue={queue}
+            playing={playing}
+            onToggle={() => setPlaying(!playing)}
           />
         )}
 

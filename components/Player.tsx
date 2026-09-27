@@ -5,8 +5,6 @@ import {
   Fragment,
   RefObject,
   useEffect,
-  useId,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -19,12 +17,12 @@ import {
   TbDisc,
   TbExternalLink,
   TbLink,
+  TbPictureInPicture,
   TbPlaylistAdd,
   TbShare3,
   TbUser,
   TbMicrophone2,
   TbMusic,
-  TbPlayerPauseFilled,
   TbPlayerPlayFilled,
   TbPlayerTrackPrevFilled,
   TbPlayerTrackNextFilled,
@@ -49,8 +47,11 @@ import {
   shuffled,
 } from "@/lib/music";
 import { getLyrics } from "@/lib/lyrics";
-import { createListener, envelope, heightsOf } from "@/lib/listen";
+import { backdropDim, markTone } from "@/lib/tone";
+import Horizon, { livelyDesk } from "./Horizon";
 import LyricsPanel from "./Lyrics";
+import { useMiniPlayer } from "./MiniPlayer";
+import { Backdrop, Btn, useArtTone } from "./PlayerKit";
 import { flushSync } from "react-dom";
 import Image from "next/image";
 
@@ -104,6 +105,7 @@ export default function Player({
   const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
+  const hasAudio = !!track;
   const artLum = useArtTone(track?.artwork).lum;
   const lyricsless = !!track && noLyrics === track.id;
   const lyricsChecking = !!track && lyricsChecked !== track.id;
@@ -157,6 +159,13 @@ export default function Player({
     t.ready.catch(() => {});
     t.finished.finally(() => delete root.dataset.vt);
   };
+  useEffect(() => {
+    if (!playing || !track) return;
+    const was = document.title;
+    document.title = `▶ ${track.title} – ${track.artist}`;
+    return () => void (document.title = was);
+  }, [playing, track]);
+
   const toggleLyrics = () => {
     if (!lyricsless) transition(() => setShowLyrics(!showLyrics));
   };
@@ -227,6 +236,25 @@ export default function Player({
     step(-1);
   };
 
+  const seekMax = dur || track?.duration || 0;
+  const seek = (t: number) => {
+    setTime(t);
+    if (audioRef.current) audioRef.current.currentTime = t;
+  };
+
+  const mini = useMiniPlayer({
+    track,
+    playing,
+    setPlaying,
+    time,
+    dur: seekMax,
+    onSeek: seek,
+    next,
+    prev,
+    audio: audioRef,
+    analyser: graph,
+  });
+
   // Load the source whenever the track changes. Local tracks come out of IndexedDB
   // as an object URL, so the previous one gets revoked to avoid leaking blobs.
   useEffect(() => {
@@ -283,7 +311,7 @@ export default function Player({
   // screen lock, which would stop background playback.
   useEffect(() => {
     const a = audioRef.current;
-    if (!a || !full || !playing) return;
+    if (!a || !(full || mini.window) || !playing) return;
     if (!graph.current && livelyDesk()) {
       try {
         const ctx = new AudioContext();
@@ -297,15 +325,17 @@ export default function Player({
       } catch {}
     }
     graph.current?.ctx.resume().catch(() => {});
-  }, [full, playing]);
+  }, [full, mini.window, playing]);
 
+  // The <audio> only mounts once there is a track, after the restored settings
+  // first run, so they are applied again when it appears.
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
-  }, [volume]);
+  }, [volume, hasAudio]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.muted = muted;
-  }, [muted]);
+  }, [muted, hasAudio]);
 
   // Persist the session as it changes, so the next visit resumes it (Spotify-style).
   // Playback position goes through saveSessionTime instead — see onTimeUpdate.
@@ -368,7 +398,7 @@ export default function Player({
 
   // The bindings YouTube, Spotify and Apple Music agree on, and YouTube's where
   // they differ — see lib/shortcuts.ts for the list this implements. They work
-  // wherever a track is loaded, not only in the full view.
+  // wherever a track is loaded, not only in the full view, and in the mini player.
   //
   // The full view is deliberately not the Fullscreen API: it fills the page, it
   // does not take over the browser chrome, so Escape is handled here.
@@ -403,6 +433,7 @@ export default function Player({
 
       switch (e.code) {
         case "Escape":
+          if (el?.ownerDocument === mini.window?.document) return mini.close();
           if (full && lyricsOn) return setShowLyrics(false);
           return setFull(false);
         case "KeyY":
@@ -418,17 +449,21 @@ export default function Player({
         case "KeyK":
           e.preventDefault();
           return setPlaying(!playing);
-        // I is the plain full view; F drives towards the immersive one, dropping
-        // the queue on the way and leaving altogether once there is nothing left
-        // to drop.
         case "KeyI":
           e.preventDefault();
-          return full ? setFull(false) : openFull(true);
+          if (!mini.supported)
+            return void toast("This browser can't open the mini player", {
+              id: "mini",
+            });
+          return mini.toggle();
         case "KeyF":
           e.preventDefault();
-          if (!full) return openFull(false);
-          if (showQueue) return setShowQueue(false);
-          return setFull(false);
+          return full ? setFull(false) : openFull(false);
+        case "KeyQ":
+          e.preventDefault();
+          if (full) return setShowQueue(!showQueue);
+          setShowQueue(true);
+          return setFull(true);
         case "KeyN":
           if (!e.shiftKey) return;
           e.preventDefault();
@@ -473,9 +508,17 @@ export default function Player({
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // The mini player is its own window, so it needs its own listener.
+    const pip = mini.window;
+    pip?.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      pip?.removeEventListener("keydown", onKey);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    mini.window,
+    mini.isOpen,
     full,
     showQueue,
     showLyrics,
@@ -498,12 +541,6 @@ export default function Player({
   }, [full]);
 
   if (!track) return null;
-
-  const seekMax = dur || track.duration || 0;
-  const seek = (t: number) => {
-    setTime(t);
-    if (audioRef.current) audioRef.current.currentTime = t;
-  };
 
   return (
     <>
@@ -537,6 +574,8 @@ export default function Player({
         onEnded={next}
         onError={() => fail("Playback failed.")}
       />
+
+      {mini.portal}
 
       {full && (
         <FullView
@@ -578,6 +617,8 @@ export default function Player({
             onGoTo(kind, name);
           }}
           onClose={() => setFull(false)}
+          onMini={mini.supported ? mini.toggle : undefined}
+          mini={mini.isOpen}
         />
       )}
 
@@ -590,20 +631,23 @@ export default function Player({
             layer sits above the content, it is not welded to the screen.
             70rem = the main column's max-w-6xl minus its px-4, so the capsule's
             edges line up with the content above it. */}
-        <div className="glass relative mx-auto max-w-[70rem] overflow-hidden rounded-sheet shadow-2xl shadow-black/50 ring-1 ring-white/10">
-          {/* Glass has no colour of its own — it takes it from what is behind.
-              Nothing is behind a bar at the screen edge, so the artwork stands in
-              and the capsule reads in the album's colour (HIG — Liquid Glass). */}
-          {track.artwork && (
-            <img
-              src={track.artwork}
-              alt=""
-              aria-hidden
-              className="pointer-events-none absolute inset-0 h-full w-full scale-150 object-cover opacity-35 blur-2xl saturate-150"
-            />
-          )}
-          {/* The rim light that gives the material its thickness. */}
-          <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
+        {/* Clipped per layer, not on the capsule, so the volume popover can rise above it. */}
+        <div className="glass relative mx-auto max-w-[70rem] rounded-sheet shadow-2xl shadow-black/50 ring-1 ring-white/10">
+          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-sheet">
+            {/* Glass has no colour of its own — it takes it from what is behind.
+                Nothing is behind a bar at the screen edge, so the artwork stands in
+                and the capsule reads in the album's colour (HIG — Liquid Glass). */}
+            {track.artwork && (
+              <img
+                src={track.artwork}
+                alt=""
+                aria-hidden
+                className="absolute inset-0 h-full w-full scale-150 object-cover opacity-35 blur-2xl saturate-150"
+              />
+            )}
+            {/* The rim light that gives the material its thickness. */}
+            <span className="absolute inset-x-0 top-0 h-px bg-white/20" />
+          </div>
 
           <div className="relative flex items-center gap-3 p-2 sm:gap-4 sm:p-3">
             <button
@@ -664,108 +708,73 @@ export default function Player({
               </div>
             </div>
 
-            <div className="flex items-center gap-1">
-              <span className="hidden sm:block">
-                <Btn onClick={toggleShuffle} active={shuffle} label="Shuffle">
-                  <TbArrowsShuffle />
+            <div className="flex items-center">
+              <div className="flex items-center gap-1">
+                <span className="hidden sm:block">
+                  <Btn onClick={toggleShuffle} active={shuffle} label="Shuffle">
+                    <TbArrowsShuffle />
+                  </Btn>
+                </span>
+                <Btn onClick={prev} label="Previous">
+                  <TbPlayerTrackPrevFilled />
                 </Btn>
-              </span>
-              <Btn onClick={prev} label="Previous">
-                <TbPlayerTrackPrevFilled />
-              </Btn>
-              <button
-                onClick={() => setPlaying(!playing)}
-                aria-label={playing ? "Pause" : "Play"}
-                title={playing ? "Pause" : "Play"}
-                className="group grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
-              >
-                {playing ? (
-                  <span className="morph-out">
-                    <Logo
-                      size={20}
-                      live
-                      art={track.artwork}
-                      tone={markTone(artLum)}
-                      className="live-mark"
-                    />
-                  </span>
-                ) : (
-                  <TbPlayerPlayFilled size={18} />
-                )}
-              </button>
-              <Btn onClick={next} label="Next">
-                <TbPlayerTrackNextFilled />
-              </Btn>
-              <span className="hidden sm:block">
-                <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
-                  <TbRepeat />
-                </Btn>
-              </span>
-              <span className="ml-2 hidden items-center gap-2 sm:flex">
                 <button
-                  onClick={() => setMuted(!muted)}
-                  aria-label={muted ? "Unmute" : "Mute"}
-                  title={muted ? "Unmute (M)" : "Mute (M)"}
-                  aria-pressed={muted}
-                  className="shrink-0 text-label-2 transition hover:text-label"
+                  onClick={() => setPlaying(!playing)}
+                  aria-label={playing ? "Pause" : "Play"}
+                  title={playing ? "Pause" : "Play"}
+                  className="group grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
                 >
-                  {muted ? <TbVolumeOff size={16} /> : <TbVolume size={16} />}
+                  {playing ? (
+                    <span className="morph-out">
+                      <Logo
+                        size={20}
+                        live
+                        art={track.artwork}
+                        tone={markTone(artLum)}
+                        className="live-mark"
+                      />
+                    </span>
+                  ) : (
+                    <TbPlayerPlayFilled size={18} />
+                  )}
                 </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={muted ? 0 : volume}
-                  onChange={(e) => {
-                    setMuted(false);
-                    setVolume(Number(e.target.value));
-                  }}
-                  className="range w-20"
-                  style={filled(muted ? 0 : volume, 1)}
-                  aria-label="Volume"
+                <Btn onClick={next} label="Next">
+                  <TbPlayerTrackNextFilled />
+                </Btn>
+                <span className="hidden sm:block">
+                  <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
+                    <TbRepeat />
+                  </Btn>
+                </span>
+              </div>
+              <span
+                aria-hidden
+                className="mx-2 hidden h-5 w-px bg-separator sm:block"
+              />
+              <div className="hidden items-center gap-1 sm:flex">
+                <Volume
+                  volume={volume}
+                  setVolume={setVolume}
+                  muted={muted}
+                  setMuted={setMuted}
+                  iconSize={14}
+                  overContent
                 />
-              </span>
+                {mini.supported && (
+                  <Btn
+                    onClick={mini.toggle}
+                    active={mini.isOpen}
+                    label="Mini player (I)"
+                  >
+                    <TbPictureInPicture />
+                  </Btn>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </div>
     </>
-  );
-}
-
-/** `unavailable` uses aria-disabled so the reason in the tooltip stays reachable. */
-function Btn({
-  onClick,
-  children,
-  active,
-  label,
-  unavailable,
-  busy,
-}: {
-  onClick: () => void;
-  children: React.ReactNode;
-  active?: boolean;
-  label: string;
-  unavailable?: string | false;
-  busy?: string | false;
-}) {
-  return (
-    <button
-      onClick={unavailable ? undefined : onClick}
-      aria-label={unavailable ? `${label}: ${unavailable}` : label}
-      title={unavailable || busy || label}
-      aria-busy={busy ? true : undefined}
-      aria-pressed={unavailable ? undefined : active}
-      aria-disabled={unavailable ? true : undefined}
-      className={`grid h-8 w-8 place-items-center rounded-full text-sm transition ${
-        unavailable
-          ? "cursor-not-allowed text-label-2 opacity-35"
-          : `hover:bg-fill active:scale-95 ${active ? "text-accent" : "text-label-2 hover:text-label"} ${busy ? "animate-pulse" : ""}`
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -816,263 +825,22 @@ function Seek({
   );
 }
 
-/** Loudness values per second in a decoded envelope. */
-const ENV_RATE = 40;
-
-/** A mouse-driven screen without Reduce Motion: where the horizon listens. */
-const livelyDesk = () =>
-  window.matchMedia("(hover: hover) and (pointer: fine)").matches &&
-  !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-/** Loop heights from the track id: the same song always draws the same line. */
-function waveHeights(seed: string, n: number) {
-  let h = 2166136261;
-  for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
-  const rand = () => {
-    h = Math.imul(h ^ (h >>> 15), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    return ((h ^= h >>> 16) >>> 0) / 4294967296;
-  };
-  const raw = Array.from({ length: n }, rand);
-  // Neighbours wrap around, so the pattern tiles without a seam.
-  return raw.map((v, i) => {
-    const smooth = (raw.at(i - 1)! + v * 6 + raw[(i + 1) % n]) / 8;
-    return 0.3 + 0.7 * smooth ** 1.2;
-  });
-}
-
-/**
- * Tall, narrow loops, alternately up and down, rounded at the turns; `heights`
- * are 0–1 per loop. `shift` slides the line left by part of a loop, and `flip`
- * starts it on a downstroke.
- */
-function loopPath(
-  heights: number[],
-  step: number,
-  H: number,
-  shift = 0,
-  flip = false,
-) {
-  const mid = H / 2;
-  const r = step / 2;
-  let path = `M${-shift} ${mid}`;
-  heights.forEach((a, i) => {
-    const x = i * step - shift;
-    const reach = Math.max(a * (mid - 2), r + 0.5);
-    path +=
-      (i % 2 === 0) !== flip
-        ? ` L${x} ${mid - reach + r} A${r} ${r} 0 0 1 ${x + step} ${mid - reach + r}`
-        : ` L${x} ${mid + reach - r} A${r} ${r} 0 0 0 ${x + step} ${mid + reach - r}`;
-  });
-  return path;
-}
-
-/**
- * The full view's waveform. On a desktop it is the song's decoded loudness
- * around the playhead (right edge = now); elsewhere a seeded pattern, flowing.
- */
-function Horizon({
-  track,
-  playing,
-  hue,
-  analyser,
-  audio,
-}: {
-  track: Track;
-  playing: boolean;
-  hue: number | null;
-  analyser: RefObject<{ an: AnalyserNode } | null>;
-  audio: RefObject<HTMLAudioElement | null>;
-}) {
-  const box = useRef<HTMLDivElement>(null);
-  const grad = useId();
-
-  const seed = track.id;
-  const [desk] = useState(livelyDesk);
-  const env = useRef<Float32Array | null>(null);
-  useEffect(() => {
-    if (!desk) return;
-    let gone = false;
-    let url: string | undefined;
-    (async () => {
-      url = await audioSrc(track);
-      if (!url || gone) return;
-      const data = await (await fetch(url)).arrayBuffer();
-      // 8 kHz keeps a whole song to a few MB; plenty for loudness.
-      const buf = await new OfflineAudioContext(1, 1, 8000).decodeAudioData(
-        data,
-      );
-      if (!gone) env.current = heightsOf(envelope(buf, ENV_RATE));
-    })()
-      .catch(() => {})
-      .finally(() => url?.startsWith("blob:") && URL.revokeObjectURL(url));
-    return () => void (gone = true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track.id, desk]);
-  const stops =
-    hue === null
-      ? ["#8e97aa", "#d3d8e3", "#ffffff"]
-      : [
-          `hsl(${hue - 35} 85% 56%)`,
-          `hsl(${hue} 85% 68%)`,
-          `hsl(${hue + 35} 95% 88%)`,
-        ];
-  const [w, setW] = useState(0);
-  useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setW(el.clientWidth));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // Quieter on a phone, where the same band would crowd the controls.
-  const small = w > 0 && w < 640;
-  const k = small ? 1 : 0.85;
-  const H = small ? 40 : 64 * k;
-  const step = small ? 5 : 6 * k;
-  // An even loop count, so each copy of the pattern starts on an upstroke.
-  const n = Math.floor(w / step / 2) * 2;
-  const period = n * step;
-  // Three copies: the view slides one period, and the width can run a loop past it.
-  const d = useMemo(() => {
-    if (!n) return "";
-    const hs = waveHeights(seed, n);
-    return loopPath([...hs, ...hs, ...hs], step, H);
-  }, [seed, n, H, step]);
-
-  useEffect(() => {
-    const el = box.current;
-    const a = audio.current;
-    if (!el || !a || !desk || !n) return;
-    const paths = el.querySelectorAll("path");
-    const cols = Math.ceil(w / step) + 2;
-    const speed = 70;
-    const slice = step / speed;
-    const rest = waveHeights(`${seed}:rest`, 64).map(
-      (h) => 0.1 + 0.5 * ((h - 0.3) / 0.7) ** 1.6,
-    );
-    const hear = createListener();
-    const heights = new Array<number>(cols);
-    let freq: Uint8Array<ArrayBuffer> | null = null;
-    let clock = a.currentTime;
-    let morph = 0;
-    let hadEnv = !!env.current;
-    let drawn = "";
-    let last = performance.now();
-    let frame = 0;
-    el.dataset.reactive = "";
-    const tick = (now: number) => {
-      const dt = (now - last) / 1000;
-      last = now;
-      // currentTime advances in coarse steps; a local clock keeps the scroll smooth.
-      if (!a.paused) clock += dt * a.playbackRate;
-      const jumped = Math.abs(clock - a.currentTime) > 0.15;
-      if (jumped || (env.current && !hadEnv)) morph = 0.5;
-      hadEnv = !!env.current;
-      if (a.paused || jumped) clock = a.currentTime;
-
-      const lv = env.current;
-      const pos = clock / slice;
-      const endJ = Math.floor(pos);
-      const j0 = endJ - cols + 1;
-      for (let i = 0; i < cols; i++) {
-        const j = j0 + i;
-        const from = Math.floor(j * slice * ENV_RATE);
-        const to = Math.ceil((j + 1) * slice * ENV_RATE);
-        let v = -1;
-        if (lv && from >= 0)
-          for (let e = from; e < to && e < lv.length; e++)
-            v = Math.max(v, lv[e]);
-        const target = v >= 0 ? v : rest[((j % 64) + 64) % 64];
-        heights[i] =
-          morph > 0 && heights[i] !== undefined
-            ? heights[i] + (target - heights[i]) * (1 - Math.exp(-dt / 0.1))
-            : target;
-      }
-      morph = Math.max(morph - dt, 0);
-      const path = loopPath(
-        heights,
-        step,
-        H,
-        (pos - endJ) * step,
-        ((j0 % 2) + 2) % 2 === 1,
-      );
-      if (path !== drawn) {
-        for (const p of paths) p.setAttribute("d", path);
-        drawn = path;
-      }
-
-      const an = analyser.current?.an;
-      if (an && !a.paused) {
-        freq ??= new Uint8Array(an.frequencyBinCount);
-        an.getByteFrequencyData(freq);
-        const h = hear(freq, dt);
-        el.style.setProperty("--pulse", h.pulse.toFixed(3));
-        el.style.setProperty("--bright", h.bright.toFixed(3));
-      }
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [desk, analyser, audio, seed, n, w, H, step]);
-
-  return (
-    <div
-      ref={box}
-      aria-hidden
-      data-playing={playing || undefined}
-      className="horizon pointer-events-none absolute inset-0"
-      style={
-        {
-          "--period": `-${period}px`,
-          "--flow-time": `${period / 40}s`,
-          "--glow": stops[1],
-          "--k": k,
-        } as CSSProperties
-      }
-    >
-      <div className="horizon-band" style={{ height: H + 20 * k }}>
-        <div className="horizon-line">
-          <svg width={period * 3} height={H}>
-            <defs>
-              <linearGradient
-                id={grad}
-                gradientUnits="userSpaceOnUse"
-                x1="0"
-                y1={H}
-                x2="0"
-                y2="0"
-              >
-                {stops.map((c, i) => (
-                  <stop key={i} offset={i / 2} stopColor={c} />
-                ))}
-              </linearGradient>
-            </defs>
-            <path d={d} style={{ stroke: `url(#${CSS.escape(grad)})` }} />
-          </svg>
-        </div>
-        <div className="horizon-line horizon-shine">
-          <svg width={period * 3} height={H}>
-            <path d={d} />
-          </svg>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /** Mute button that opens a vertical volume slider on hover or focus. */
 function Volume({
   volume,
   setVolume,
   muted,
   setMuted,
+  iconSize = 20,
+  overContent,
 }: {
   volume: number;
   setVolume: (v: number) => void;
   muted: boolean;
   setMuted: (m: boolean) => void;
+  iconSize?: number;
+  /** Rises clear of the bottom bar, in the opaque popover material. */
+  overContent?: boolean;
 }) {
   const level = muted ? 0 : volume;
   return (
@@ -1089,13 +857,17 @@ function Volume({
         label={muted ? "Unmute (M)" : "Mute (M)"}
       >
         {muted || volume === 0 ? (
-          <TbVolumeOff size={20} />
+          <TbVolumeOff size={iconSize} />
         ) : (
-          <TbVolume size={20} />
+          <TbVolume size={iconSize} />
         )}
       </Btn>
-      <div className="invisible absolute bottom-full left-1/2 -translate-x-1/2 pb-2 opacity-0 transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
-        <div className="relative h-32 w-9 rounded-full bg-black/60 backdrop-blur-xl ring-1 ring-white/10">
+      <div
+        className={`invisible absolute bottom-full left-1/2 -translate-x-1/2 opacity-0 transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100 ${overContent ? "pb-9" : "pb-2"}`}
+      >
+        <div
+          className={`relative h-32 w-9 rounded-full ring-1 ring-white/10 ${overContent ? "glass-thick shadow-2xl shadow-black/50" : "bg-black/60 backdrop-blur-xl"}`}
+        >
           <input
             type="range"
             min={0}
@@ -1404,66 +1176,6 @@ function TrackMenu({
   );
 }
 
-/** Brightness scale that keeps the cover-filled mark visible on the light play button. */
-const markTone = (lum: number | null) =>
-  lum === null ? 0.6 : Math.min(1, 0.3 / lum);
-
-/**
- * Reads an image once: its average luminance (0–1), and the hue of its most
- * vivid colour (null when the art is greyscale). Both are null when the image
- * can't be read (no CORS, no art).
- */
-function useArtTone(src?: string) {
-  const [tone, setTone] = useState<{
-    lum: number | null;
-    hue: number | null;
-  }>({ lum: null, hue: null });
-  useEffect(() => {
-    if (!src) return;
-    const img = document.createElement("img");
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      try {
-        const c = document.createElement("canvas");
-        c.width = c.height = 8;
-        const g = c.getContext("2d")!;
-        g.drawImage(img, 0, 0, 8, 8);
-        const d = g.getImageData(0, 0, 8, 8).data;
-        let sum = 0;
-        let best = { s: 0, h: 0 };
-        for (let i = 0; i < d.length; i += 4) {
-          const [r, gr, b] = [d[i] / 255, d[i + 1] / 255, d[i + 2] / 255];
-          sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-          const max = Math.max(r, gr, b);
-          const span = max - Math.min(r, gr, b);
-          // Chroma, so a dark muddy pixel does not outrank a clear colour.
-          if (span > best.s) {
-            const h =
-              max === r
-                ? ((gr - b) / span) % 6
-                : max === gr
-                  ? (b - r) / span + 2
-                  : (r - gr) / span + 4;
-            best = { s: span, h: (h * 60 + 360) % 360 };
-          }
-        }
-        setTone({
-          lum: sum / 64 / 255,
-          hue: best.s > 0.15 ? Math.round(best.h) : null,
-        });
-      } catch {
-        setTone({ lum: null, hue: null });
-      }
-    };
-    img.onerror = () => setTone({ lum: null, hue: null });
-    img.src = src;
-    return () => {
-      img.onload = img.onerror = null;
-    };
-  }, [src]);
-  return tone;
-}
-
 /** Fills the page (not the browser) — the cover blurred behind itself, queue on the left. */
 function FullView({
   track,
@@ -1501,6 +1213,8 @@ function FullView({
   queueLen,
   onGoTo,
   onClose,
+  onMini,
+  mini,
 }: {
   track: Track;
   queue: Track[];
@@ -1537,6 +1251,8 @@ function FullView({
   queueLen: number;
   onGoTo: (kind: "artist" | "album", name: string) => void;
   onClose: () => void;
+  onMini?: () => void;
+  mini: boolean;
 }) {
   const art = track.artworkLarge ?? track.artwork;
   const { lum, hue } = useArtTone(art);
@@ -1547,32 +1263,13 @@ function FullView({
     top: boolean;
     cover: boolean;
   } | null>(null);
-  const dim = Math.min(
-    (lum === null ? 0.45 : 0.25 + lum * 0.5) + (showLyrics ? 0.2 : 0),
-    0.85,
-  );
+  const dim = Math.min(backdropDim(lum) + (showLyrics ? 0.2 : 0), 0.85);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-canvas text-white">
-      {/* The cover doubles as its own backdrop — the ambient wash with no colour API. */}
-      {art && (
-        <div
-          aria-hidden
-          data-playing={playing || undefined}
-          className="flow pointer-events-none absolute inset-0"
-        >
-          <img src={art} alt="" className="flow-base" />
-          {[0, 1, 2, 3].map((i) => (
-            <img key={i} src={art} alt="" />
-          ))}
-        </div>
-      )}
       {/* The Clear variant floats over media; artwork can be bright, so it gets a
           dimming layer to keep the controls legible (HIG — Liquid Glass > Clear). */}
-      <div
-        className="pointer-events-none absolute inset-0 transition-colors duration-300 ease-glide"
-        style={{ backgroundColor: `rgb(0 0 0 / ${dim})` }}
-      />
+      <Backdrop art={art} playing={playing} dim={dim} />
       <Horizon
         key={track.id}
         track={track}
@@ -1589,7 +1286,6 @@ function FullView({
       >
         <TbX size={16} />
       </button>
-
       <div className="relative z-10 flex h-full">
         <aside
           // Off-screen, it is out of the tab order and out of the accessibility tree.
@@ -1607,19 +1303,23 @@ function FullView({
               return (
                 <li key={`${t.id}-${i}`}>
                   <button
-                    onClick={() => setIndex(i)}
+                    onClick={() =>
+                      current ? setPlaying(!playing) : setIndex(i)
+                    }
                     aria-current={current}
                     title={`${t.title} — ${t.artist}`}
-                    className={`flex w-full items-center gap-2 pl-3 pr-4 py-2 text-left transition hover:bg-white/10 ${
+                    className={`group flex w-full items-center gap-2 pl-3 pr-4 py-2 text-left transition hover:bg-white/10 ${
                       current ? "bg-white/15" : i < index ? "opacity-50" : ""
                     }`}
                   >
                     <span className="grid w-4 shrink-0 place-items-center text-[10px] tabular-nums text-white/60">
                       {current ? (
                         playing ? (
-                          <Logo size={14} className="spin-mark text-accent" />
+                          <span className="morph-out text-accent">
+                            <Logo size={14} className="spin-mark" />
+                          </span>
                         ) : (
-                          <TbPlayerPauseFilled className="text-accent" />
+                          <TbPlayerPlayFilled className="text-accent" />
                         )
                       ) : (
                         i + 1
@@ -1664,9 +1364,9 @@ function FullView({
             half the handle's own, which is what centres it on the seam. */}
         <button
           onClick={() => setShowQueue(!showQueue)}
-          aria-label={showQueue ? "Hide queue" : "Show queue"}
+          aria-label={showQueue ? "Hide queue (Q)" : "Show queue (Q)"}
           aria-expanded={showQueue}
-          title={showQueue ? "Hide queue" : "Show queue"}
+          title={showQueue ? "Hide queue (Q)" : "Show queue (Q)"}
           className={`absolute left-0 top-5 z-30 grid h-8 w-8 place-items-center rounded-full bg-white/15 backdrop-blur-xl transition-transform duration-300 ease-out hover:bg-white/25 ${
             showQueue
               ? "translate-x-[calc(min(20rem,85vw)-50%)]"
@@ -1746,14 +1446,29 @@ function FullView({
                   )}
                   {error && <p className="mt-1 text-sm text-accent">{error}</p>}
                 </div>
-                <TrackMenu
-                  track={track}
-                  dur={dur}
-                  queuePos={queuePos}
-                  queueLen={queueLen}
-                  onAddTo={onAddTo}
-                  onGoTo={onGoTo}
-                />
+                <div className="flex shrink-0 items-center gap-2">
+                  {onMini && (
+                    <button
+                      onClick={onMini}
+                      aria-label="Mini player (I)"
+                      aria-pressed={mini}
+                      title="Mini player (I)"
+                      className={`grid h-9 w-9 place-items-center rounded-full backdrop-blur-xl transition hover:bg-white/25 active:scale-95 ${
+                        mini ? "bg-white/30" : "bg-white/15"
+                      }`}
+                    >
+                      <TbPictureInPicture size={18} />
+                    </button>
+                  )}
+                  <TrackMenu
+                    track={track}
+                    dur={dur}
+                    queuePos={queuePos}
+                    queueLen={queueLen}
+                    onAddTo={onAddTo}
+                    onGoTo={onGoTo}
+                  />
+                </div>
               </div>
             </div>
 
