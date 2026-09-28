@@ -5,6 +5,7 @@ import {
   Fragment,
   RefObject,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -105,6 +106,11 @@ export default function Player({
   const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
+  const path = useMemo(
+    () => (order?.length === queue.length ? order : queue.map((_, i) => i)),
+    [order, queue],
+  );
+  const here = path.indexOf(index);
   const hasAudio = !!track;
   const artLum = useArtTone(track?.artwork).lum;
   const lyricsless = !!track && noLyrics === track.id;
@@ -220,8 +226,7 @@ export default function Player({
   /** Walk the play order, which is the shuffled one when shuffle is on. */
   const step = (delta: 1 | -1) => {
     if (!queue.length) return;
-    const path = order ?? queue.map((_, i) => i);
-    const at = Math.max(path.indexOf(index), 0) + delta;
+    const at = Math.max(here, 0) + delta;
     if (at >= path.length)
       return repeat ? go(path[0], "next") : setPlaying(false);
     go(path[at < 0 ? path.length - 1 : at], delta > 0 ? "next" : "prev");
@@ -581,6 +586,7 @@ export default function Player({
         <FullView
           track={track}
           queue={queue}
+          path={path}
           index={index}
           setIndex={(i) => go(i)}
           loading={loading}
@@ -610,7 +616,7 @@ export default function Player({
           analyser={graph}
           error={error}
           onAddTo={() => onAddTo(track)}
-          queuePos={index + 1}
+          queuePos={here + 1}
           queueLen={queue.length}
           onGoTo={(kind, name) => {
             setFull(false);
@@ -1180,6 +1186,7 @@ function TrackMenu({
 function FullView({
   track,
   queue,
+  path,
   index,
   setIndex,
   loading,
@@ -1218,6 +1225,7 @@ function FullView({
 }: {
   track: Track;
   queue: Track[];
+  path: number[];
   index: number;
   setIndex: (i: number) => void;
   loading: boolean;
@@ -1298,7 +1306,8 @@ function FullView({
             Playing next · {queue.length} song{queue.length === 1 ? "" : "s"}
           </h3>
           <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
-            {queue.map((t, i) => {
+            {path.map((i, pos) => {
+              const t = queue[i];
               const current = i === index;
               return (
                 <li key={`${t.id}-${i}`}>
@@ -1309,7 +1318,11 @@ function FullView({
                     aria-current={current}
                     title={`${t.title} — ${t.artist}`}
                     className={`group flex w-full items-center gap-2 pl-3 pr-4 py-2 text-left transition hover:bg-white/10 ${
-                      current ? "bg-white/15" : i < index ? "opacity-50" : ""
+                      current
+                        ? "bg-white/15"
+                        : pos < queuePos - 1
+                          ? "opacity-50"
+                          : ""
                     }`}
                   >
                     <span className="grid w-4 shrink-0 place-items-center text-[10px] tabular-nums text-white/60">
@@ -1322,7 +1335,7 @@ function FullView({
                           <TbPlayerPlayFilled className="text-accent" />
                         )
                       ) : (
-                        i + 1
+                        pos + 1
                       )}
                     </span>
                     {t.artwork ? (
