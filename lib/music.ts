@@ -224,6 +224,8 @@ export type Session = {
   volume: number;
   muted: boolean;
   shuffle: boolean;
+  /** Seconds of crossfade between songs; 0 is off, and a missing value means 6. */
+  crossfade?: number;
   /** Older sessions saved a boolean or "off"; anything but "one" reads as "all". */
   repeat: Repeat | 'off' | boolean;
   /** Position in the track at `index`, tagged with its id so a stale time never applies. */
