@@ -216,13 +216,16 @@ export async function audioSrc(track: Track, signal?: AbortSignal): Promise<stri
 const SS_KEY = 'session';
 const SS_TIME_KEY = 'session-time';
 
+export type Repeat = 'all' | 'one';
+
 export type Session = {
   queue: Track[];
   index: number;
   volume: number;
   muted: boolean;
   shuffle: boolean;
-  repeat: boolean;
+  /** Older sessions saved a boolean or "off"; anything but "one" reads as "all". */
+  repeat: Repeat | 'off' | boolean;
   /** Position in the track at `index`, tagged with its id so a stale time never applies. */
   time?: { id: string; t: number };
 };

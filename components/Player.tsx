@@ -5,6 +5,7 @@ import {
   Fragment,
   RefObject,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -28,6 +29,7 @@ import {
   TbPlayerTrackNextFilled,
   TbPlaylist,
   TbRepeat,
+  TbRepeatOnce,
   TbVolume,
   TbVolumeOff,
   TbX,
@@ -35,6 +37,7 @@ import {
 import { Logo } from "@/components/Logo";
 import { toast } from "@/lib/toast";
 import {
+  Repeat,
   Track,
   artistsOf,
   audioSrc,
@@ -54,6 +57,9 @@ import { useMiniPlayer } from "./MiniPlayer";
 import { Backdrop, Btn, useArtTone } from "./PlayerKit";
 import { flushSync } from "react-dom";
 import Image from "next/image";
+
+// The queue waits on this: a scroll under the view-transition snapshot is never seen.
+let trackFade: Promise<unknown> = Promise.resolve();
 
 /** Feeds the styled range its filled (and buffered) proportion; see .range in globals.css. */
 const filled = (value: number, max: number, buffered = 0) =>
@@ -93,7 +99,9 @@ export default function Player({
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(init?.volume ?? 1);
   const [muted, setMuted] = useState(init?.muted ?? false);
-  const [repeat, setRepeat] = useState(init?.repeat ?? false);
+  const [repeat, setRepeat] = useState<Repeat>(
+    init?.repeat === "one" ? "one" : "all",
+  );
   const [shuffle, setShuffle] = useState(init?.shuffle ?? false);
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
@@ -105,6 +113,11 @@ export default function Player({
   const [order, setOrder] = useState<number[] | null>(null);
 
   const track = queue[index];
+  const path = useMemo(
+    () => (order?.length === queue.length ? order : queue.map((_, i) => i)),
+    [order, queue],
+  );
+  const here = path.indexOf(index);
   const hasAudio = !!track;
   const artLum = useArtTone(track?.artwork).lum;
   const lyricsless = !!track && noLyrics === track.id;
@@ -132,10 +145,13 @@ export default function Player({
   };
 
   const toggleRepeat = () => {
-    setRepeat(!repeat);
-    toast(repeat ? "Repeat off" : "Repeat on", {
+    const one = repeat !== "one";
+    setRepeat(one ? "one" : "all");
+    toast(one ? "Repeat one" : "Repeat one off", {
       id: "repeat",
-      description: repeat ? undefined : "The queue starts over at the end.",
+      description: one
+        ? "This song plays on a loop."
+        : "The queue plays on and starts over at the end.",
     });
   };
 
@@ -157,7 +173,7 @@ export default function Player({
     root.dataset.vt = dir;
     const t = document.startViewTransition(() => flushSync(() => setIndex(i)));
     t.ready.catch(() => {});
-    t.finished.finally(() => delete root.dataset.vt);
+    trackFade = t.finished.finally(() => delete root.dataset.vt);
   };
   useEffect(() => {
     if (!playing || !track) return;
@@ -220,11 +236,14 @@ export default function Player({
   /** Walk the play order, which is the shuffled one when shuffle is on. */
   const step = (delta: 1 | -1) => {
     if (!queue.length) return;
-    const path = order ?? queue.map((_, i) => i);
-    const at = Math.max(path.indexOf(index), 0) + delta;
-    if (at >= path.length)
-      return repeat ? go(path[0], "next") : setPlaying(false);
-    go(path[at < 0 ? path.length - 1 : at], delta > 0 ? "next" : "prev");
+    const at = Math.max(here, 0) + delta;
+    const to = path[(at + path.length) % path.length];
+    const a = audioRef.current;
+    if (to === index && a) {
+      a.currentTime = 0;
+      return void a.play().catch(() => setPlaying(false));
+    }
+    go(to, delta > 0 ? "next" : "prev");
   };
 
   const next = () => step(1);
@@ -571,6 +590,7 @@ export default function Player({
           const b = e.currentTarget.buffered;
           if (b.length) setBuffered(b.end(b.length - 1));
         }}
+        loop={repeat === "one"}
         onEnded={next}
         onError={() => fail("Playback failed.")}
       />
@@ -581,6 +601,7 @@ export default function Player({
         <FullView
           track={track}
           queue={queue}
+          path={path}
           index={index}
           setIndex={(i) => go(i)}
           loading={loading}
@@ -610,7 +631,7 @@ export default function Player({
           analyser={graph}
           error={error}
           onAddTo={() => onAddTo(track)}
-          queuePos={index + 1}
+          queuePos={here + 1}
           queueLen={queue.length}
           onGoTo={(kind, name) => {
             setFull(false);
@@ -742,9 +763,7 @@ export default function Player({
                   <TbPlayerTrackNextFilled />
                 </Btn>
                 <span className="hidden sm:block">
-                  <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
-                    <TbRepeat />
-                  </Btn>
+                  <RepeatBtn repeat={repeat} onClick={toggleRepeat} />
                 </span>
               </div>
               <span
@@ -1176,10 +1195,28 @@ function TrackMenu({
   );
 }
 
+function RepeatBtn({
+  repeat,
+  onClick,
+  size,
+}: {
+  repeat: Repeat;
+  onClick: () => void;
+  size?: number;
+}) {
+  const Icon = repeat === "one" ? TbRepeatOnce : TbRepeat;
+  return (
+    <Btn onClick={onClick} active={repeat === "one"} label="Repeat one">
+      <Icon size={size} />
+    </Btn>
+  );
+}
+
 /** Fills the page (not the browser) — the cover blurred behind itself, queue on the left. */
 function FullView({
   track,
   queue,
+  path,
   index,
   setIndex,
   loading,
@@ -1218,6 +1255,7 @@ function FullView({
 }: {
   track: Track;
   queue: Track[];
+  path: number[];
   index: number;
   setIndex: (i: number) => void;
   loading: boolean;
@@ -1231,7 +1269,7 @@ function FullView({
   prev: () => void;
   shuffle: boolean;
   toggleShuffle: () => void;
-  repeat: boolean;
+  repeat: Repeat;
   toggleRepeat: () => void;
   volume: number;
   setVolume: (v: number) => void;
@@ -1265,6 +1303,55 @@ function FullView({
   } | null>(null);
   const dim = Math.min(backdropDim(lum) + (showLyrics ? 0.2 : 0), 0.85);
 
+  // Scrolls only the list; scrollIntoView would also nudge the fixed overlay.
+  const list = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const ol = list.current;
+    let live = true;
+    let raf = 0;
+    // Any hand on the list takes over from the glide.
+    const stop = () => {
+      live = false;
+      cancelAnimationFrame(raf);
+    };
+    const hands = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    hands.forEach((e) => ol?.addEventListener(e, stop, { passive: true }));
+    trackFade.then(() => {
+      const li = ol?.querySelector<HTMLElement>("[aria-current=true]");
+      if (!live || !ol || !li) return;
+      const at =
+        li.getBoundingClientRect().top - ol.getBoundingClientRect().top;
+      // Still above the 75% line: leave it be, so rapid skips don't churn the list.
+      if (at >= 0 && at + li.offsetHeight / 2 <= ol.clientHeight * 0.75) return;
+      const from = ol.scrollTop;
+      const to = Math.max(
+        0,
+        Math.min(
+          ol.scrollHeight - ol.clientHeight,
+          from + at - ol.clientHeight * 0.25 + li.offsetHeight / 2,
+        ),
+      );
+      const dist = to - from;
+      if (Math.abs(dist) < 1) return;
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches)
+        return void (ol.scrollTop = to);
+      const dur = Math.min(900, 450 + Math.abs(dist) / 3);
+      let start = 0;
+      const tick = (now: number) => {
+        start ||= now;
+        const p = Math.min((now - start) / dur, 1);
+        const ease = p < 0.5 ? 4 * p ** 3 : 1 - (-2 * p + 2) ** 3 / 2;
+        ol.scrollTop = from + dist * ease;
+        if (p < 1 && live) raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    });
+    return () => {
+      stop();
+      hands.forEach((e) => ol?.removeEventListener(e, stop));
+    };
+  }, [index, path, showQueue]);
+
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-canvas text-white">
       {/* The Clear variant floats over media; artwork can be bright, so it gets a
@@ -1297,8 +1384,12 @@ function FullView({
           <h3 className="px-5 py-6 text-xs font-semibold uppercase text-white/60 tracking-widest">
             Playing next · {queue.length} song{queue.length === 1 ? "" : "s"}
           </h3>
-          <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
-            {queue.map((t, i) => {
+          <ol
+            ref={list}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6"
+          >
+            {path.map((i, pos) => {
+              const t = queue[i];
               const current = i === index;
               return (
                 <li key={`${t.id}-${i}`}>
@@ -1309,7 +1400,11 @@ function FullView({
                     aria-current={current}
                     title={`${t.title} — ${t.artist}`}
                     className={`group flex w-full items-center gap-2 pl-3 pr-4 py-2 text-left transition hover:bg-white/10 ${
-                      current ? "bg-white/15" : i < index ? "opacity-50" : ""
+                      current
+                        ? "bg-white/15"
+                        : pos < queuePos - 1
+                          ? "opacity-50"
+                          : ""
                     }`}
                   >
                     <span className="grid w-4 shrink-0 place-items-center text-[10px] tabular-nums text-white/60">
@@ -1322,7 +1417,7 @@ function FullView({
                           <TbPlayerPlayFilled className="text-accent" />
                         )
                       ) : (
-                        i + 1
+                        pos + 1
                       )}
                     </span>
                     {t.artwork ? (
@@ -1540,9 +1635,7 @@ function FullView({
                   <Btn onClick={next} label="Next">
                     <TbPlayerTrackNextFilled size={20} />
                   </Btn>
-                  <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
-                    <TbRepeat size={20} />
-                  </Btn>
+                  <RepeatBtn repeat={repeat} onClick={toggleRepeat} size={20} />
                 </div>
                 <Volume
                   volume={volume}
