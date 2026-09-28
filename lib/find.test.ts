@@ -26,6 +26,10 @@ test("findLyrics ranks exact hits first and matches across a line break", () => 
   assert.deepEqual(findLyrics("stay up cashing in", docs), [
     { id: "english", line: "Some nights I stay up cashing in my bad luck" },
   ]);
+  // A phrase inside the second line of a pair shows that line, not both.
+  assert.deepEqual(findLyrics("dherai chha antama", docs), [
+    { id: "nepali", line: "गर्नलाई धेरै छ, अन्तमा जानै छ" },
+  ]);
   // A single word is only matched exactly; by sound it would hit everything.
   assert.deepEqual(findLyrics("nights", docs), [{ id: "english", line: "Some nights I stay up" }]);
   assert.deepEqual(findLyrics("nites", docs), []);

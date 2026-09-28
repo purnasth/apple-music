@@ -97,14 +97,21 @@ export function findLyrics(query: string, docs: LyricDoc[], limit = 20) {
     let hit: LyricHit | null = null;
     let isExact = false;
     for (let i = 0; i < d.lines.length; i++) {
+      // The line that matched alone, or both when the phrase runs across them.
+      const pick = (has: (j: number) => boolean) =>
+        has(i)
+          ? d.lines[i]
+          : d.lines[i + 1] && has(i + 1)
+            ? d.lines[i + 1]
+            : pair(d.lines, i);
       if (pair(d.p, i).includes(q)) {
-        const line = d.p[i].includes(q) ? d.lines[i] : pair(d.lines, i);
+        const line = pick((j) => d.p[j].includes(q));
         hit = { id: d.id, line };
         isExact = true;
         break;
       }
       if (!hit && bySound(pair(d.s, i))) {
-        const line = bySound(d.s[i]) ? d.lines[i] : pair(d.lines, i);
+        const line = pick((j) => bySound(d.s[j]));
         hit = { id: d.id, line };
       }
     }
