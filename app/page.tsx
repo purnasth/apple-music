@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import {
@@ -48,6 +48,7 @@ import {
   shuffled,
   artistsOf,
 } from "@/lib/music";
+import { findLyrics, lyricDoc, LyricDoc } from "@/lib/find";
 
 /**
  * Importing writes into *this browser's* IndexedDB, which is worth doing on the
@@ -94,6 +95,11 @@ export default function Home() {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   const [library, setLibrary] = useState<Track[]>([]);
+  // Tagged with the library it was read from, so an import or removal re-reads it.
+  const [lyricIndex, setLyricIndex] = useState<{
+    of: Track[];
+    docs: LyricDoc[];
+  } | null>(null);
   // The library tab is the landing tab now, and songs.json takes a moment —
   // without this the empty-library dropzone flashes on every load.
   const [loaded, setLoaded] = useState(false);
@@ -254,6 +260,32 @@ export default function Home() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  // Every song's lyrics, read the first time a search could use them. The
+  // service worker keeps /songs-lyrics/, so after that it costs nothing, offline too.
+  const lyricDocs = lyricIndex?.of === library ? lyricIndex.docs : null;
+  const wantLyrics = tab === "search" && query.trim().length >= 4;
+  useEffect(() => {
+    if (!wantLyrics || lyricDocs || !library.length) return;
+    let gone = false;
+    const of = library;
+    Promise.all(
+      of
+        .filter((t) => t.lyrics)
+        .map(async (t) => {
+          // Bundled songs point at a file; imported ones carry the text itself.
+          const text = t.lyrics!.startsWith("/songs-lyrics/")
+            ? await fetch(t.lyrics!).then((r) => (r.ok ? r.text() : ""))
+            : t.lyrics!;
+          return lyricDoc(t.id, text);
+        })
+        .map((p) => p.catch(() => null)),
+    ).then((docs) => {
+      if (!gone)
+        setLyricIndex({ of, docs: docs.filter((d): d is LyricDoc => !!d) });
+    });
+    return () => void (gone = true);
+  }, [wantLyrics, lyricDocs, library]);
 
   // Debounced search; the in-flight request is aborted when the query moves on.
   useEffect(() => {
@@ -708,9 +740,26 @@ export default function Home() {
         )
       : [];
 
+  // Then songs with the words in their lyrics, each with the line it matched.
+  const lyricHits = useMemo(
+    () => (tab === "search" && lyricDocs ? findLyrics(query, lyricDocs) : []),
+    [tab, lyricDocs, query],
+  );
+  const inTitle = new Set(libMatches.map((t) => t.id));
+  const byId = new Map(library.map((t) => [t.id, t]));
+  const snippets = new Map<string, string>();
+  const lyricMatches: Track[] = [];
+  for (const h of lyricHits) {
+    const t = byId.get(h.id);
+    if (!t || inTitle.has(t.id)) continue;
+    snippets.set(t.id, h.line);
+    lyricMatches.push(t);
+  }
+  const fromLibrary = libMatches.length + lyricMatches.length;
+
   const shown =
     tab === "search"
-      ? [...libMatches, ...results]
+      ? [...libMatches, ...lyricMatches, ...results]
       : tab === "library"
         ? inLibrary
         : (detail?.tracks ?? []);
@@ -752,7 +801,7 @@ export default function Home() {
                 setQuery(e.target.value);
                 setTab("search");
               }}
-              placeholder="Songs, artists, albums…"
+              placeholder="Songs, artists, albums, lyrics…"
               className="h-9 w-full rounded-control bg-fill pl-9 pr-9 text-sm outline-none transition placeholder:text-label-3 focus:bg-fill-2"
             />
             {!!query && (
@@ -1095,7 +1144,7 @@ export default function Home() {
                 if (queue[qIndex]?.id === track.id) return setPlaying(!playing);
                 // A song found by typing plays on through the library, not just the matches.
                 const all =
-                  tab === "search" && i < libMatches.length
+                  tab === "search" && i < fromLibrary
                     ? [...library].sort(SORTS[sort])
                     : tab === "library" && needle
                       ? byArtist
@@ -1103,6 +1152,7 @@ export default function Home() {
                 if (all) play(all, all.findIndex((t) => t.id === track.id));
                 else play(shown, i);
               }}
+              snippet={tab === "search" ? snippets.get(track.id) : undefined}
               onAddTo={() => setAddTo(track)}
               onRemove={
                 // Bundled tracks ship with the site; removeTrack can't evict one, it would just reappear.
@@ -1373,6 +1423,7 @@ function Row({
   onPlay,
   onAddTo,
   onRemove,
+  snippet,
 }: {
   track: Track;
   active: boolean;
@@ -1380,6 +1431,8 @@ function Row({
   onPlay: () => void;
   onAddTo: () => void;
   onRemove?: () => void;
+  /** The lyric line a search matched. */
+  snippet?: string;
 }) {
   return (
     <li className="group relative flex items-center gap-3 rounded-control px-1 py-1 transition hover:bg-fill">
@@ -1432,6 +1485,11 @@ function Row({
           {track.artist}
           {track.album ? ` — ${track.album}` : ""}
         </div>
+        {snippet && (
+          <div className="truncate text-[11px] italic text-label-3">
+            “{snippet}”
+          </div>
+        )}
       </button>
 
       <span className="hidden text-xs tabular-nums text-label-3 sm:block">
