@@ -685,18 +685,18 @@ export default function Home() {
 
   const needle = filter.trim().toLowerCase();
   const artistNeedle = artist.trim().toLowerCase();
-  const inLibrary = inFolder
+  const byArtist = inFolder
     .filter(
       (t) =>
         !artistNeedle ||
         artistsOf(t.artist).some((a) => a.toLowerCase() === artistNeedle),
     )
-    .filter(
-      (t) =>
-        !needle ||
-        `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(needle),
-    )
     .sort(SORTS[sort]);
+  const inLibrary = byArtist.filter(
+    (t) =>
+      !needle ||
+      `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(needle),
+  );
 
   // Search covers the library too: your own full tracks rank above the
   // catalogue's 30s previews, the way Apple Music folds "Your Library" in.
@@ -1092,7 +1092,15 @@ export default function Home() {
               active={queue[qIndex]?.id === track.id}
               playing={playing && queue[qIndex]?.id === track.id}
               onPlay={() => {
-                if (queue[qIndex]?.id === track.id) setPlaying(!playing);
+                if (queue[qIndex]?.id === track.id) return setPlaying(!playing);
+                // A song found by typing plays on through the library, not just the matches.
+                const all =
+                  tab === "search" && i < libMatches.length
+                    ? [...library].sort(SORTS[sort])
+                    : tab === "library" && needle
+                      ? byArtist
+                      : null;
+                if (all) play(all, all.findIndex((t) => t.id === track.id));
                 else play(shown, i);
               }}
               onAddTo={() => setAddTo(track)}
