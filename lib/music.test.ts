@@ -12,6 +12,9 @@ import {
   decodePlaylist,
   encodeBackup,
   decodeBackup,
+  mostPlayed,
+  topArtists,
+  type Plays,
   type Track,
 } from './music.ts';
 
@@ -186,4 +189,32 @@ test('current swaps stored copies for the library\'s, keeping unknown tracks', (
   const fresh = { ...stale, words: '/songs-words/a.json?v=1' };
   const gone = { id: 'file:gone.m4a', title: 'G', artist: 'X', preview: '/g' };
   assert.deepEqual(current([stale, gone], [fresh]), [fresh, gone]);
+});
+
+test('mostPlayed and topArtists rank by plays in range, splitting collaborations', () => {
+  const t = (id: string, artist: string): Track => ({ id, title: id, artist, album: '', artwork: `/${id}.jpg` });
+  const plays: Plays = {
+    a: { t: t('a', 'Swar'), at: [100, 200, 300] },
+    b: { t: t('b', 'Swar & John Rai'), at: [150, 250] },
+    c: { t: t('c', 'john rai'), at: [50] },
+    d: { t: t('d', 'The 1975'), at: [10, 20, 30, 40] },
+  };
+  assert.deepEqual(
+    mostPlayed(plays).map((x) => [x.track.id, x.n]),
+    [['d', 4], ['a', 3], ['b', 2], ['c', 1]],
+  );
+  // Only plays from 100 on: The 1975's four are all older.
+  assert.deepEqual(
+    mostPlayed(plays, 100).map((x) => x.track.id),
+    ['a', 'b'],
+  );
+  assert.deepEqual(topArtists(plays, 100), [
+    { name: 'Swar', n: 5, art: '/a.jpg' },
+    { name: 'John Rai', n: 2, art: '/b.jpg' },
+  ]);
+  // Case-only spellings merge, and the more-played spelling wins.
+  assert.deepEqual(
+    topArtists(plays).find((a) => a.name.toLowerCase() === 'john rai'),
+    { name: 'John Rai', n: 3, art: '/b.jpg' },
+  );
 });

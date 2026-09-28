@@ -109,6 +109,8 @@ type Props = {
   setPlaying: (p: boolean) => void;
   onAddTo: (t: Track) => void;
   onGoTo: (kind: "artist" | "album", name: string) => void;
+  /** A song has been listened to long enough to count as a play. */
+  onPlayed: (t: Track) => void;
 };
 
 export default function Player({
@@ -119,6 +121,7 @@ export default function Player({
   setPlaying,
   onAddTo,
   onGoTo,
+  onPlayed,
 }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(audioPool()[0] ?? null);
   const graph = useRef<{ ctx: AudioContext; an: AnalyserNode } | null>(null);
@@ -142,6 +145,7 @@ export default function Player({
   const [init] = useState(getSession);
   const resume = useRef(init?.time ?? null);
   const lastSaved = useRef(0);
+  const lastTime = useRef(0);
   const [time, setTime] = useState(0);
   const [dur, setDur] = useState(0);
   const [buffered, setBuffered] = useState(0);
@@ -627,6 +631,14 @@ export default function Player({
     on.current = {
       timeupdate: (a) => {
         setTime(a.currentTime);
+        // A play is 30 seconds heard (half of a shorter song), Spotify's rule. It
+        // counts when playback walks past the mark, so a seek or a resumed session
+        // does not, and a replay from the top does.
+        const mark = Math.min(30, (a.duration || 60) / 2);
+        const was = lastTime.current;
+        lastTime.current = a.currentTime;
+        if (was < mark && a.currentTime >= mark && a.currentTime - was < 2)
+          onPlayed(track!);
         // Checkpoint the position every few seconds; pagehide catches the rest.
         if (Math.abs(a.currentTime - lastSaved.current) > 5) {
           lastSaved.current = a.currentTime;

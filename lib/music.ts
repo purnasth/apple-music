@@ -278,6 +278,79 @@ export function pushRecent(t: Track): Track[] {
   return list;
 }
 
+/* ---------- Plays: when each song was heard, for Most Played and the month ---------- */
+
+const PLAYS_KEY = 'plays';
+
+/** Each song's play times in epoch seconds, with the track as it was last heard. */
+export type Plays = Record<string, { t: Track; at: number[] }>;
+
+export function getPlays(): Plays {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(localStorage.getItem(PLAYS_KEY) ?? '{}') as Plays;
+  } catch {
+    return {};
+  }
+}
+
+/** Log one play of the track now, and hand back every play. */
+export function recordPlay(t: Track, now = Date.now()): Plays {
+  const plays = getPlays();
+  const at = plays[t.id]?.at ?? [];
+  at.push(Math.round(now / 1000));
+  // Object URLs for local artwork are per-session, so drop them before persisting.
+  plays[t.id] = { t: t.local ? { ...t, artwork: undefined } : t, at };
+  localStorage.setItem(PLAYS_KEY, JSON.stringify(plays));
+  return plays;
+}
+
+/** The first moment of this calendar month, in epoch seconds. */
+export const monthStart = (d = new Date()) =>
+  new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
+
+/** Songs by plays since a moment, most first; a tie goes to the one heard last. */
+export function mostPlayed(plays: Plays, since = 0, limit = 25) {
+  return Object.values(plays)
+    .map(({ t, at }) => {
+      const inRange = at.filter((s) => s >= since);
+      return { track: t, n: inRange.length, last: inRange.at(-1) ?? 0 };
+    })
+    .filter((x) => x.n)
+    .sort((a, b) => b.n - a.n || b.last - a.last)
+    .slice(0, limit);
+}
+
+/**
+ * Artists by plays since a moment. A collaboration counts for each credited
+ * artist; the cover is that of their most played song, the spelling the one
+ * credited most often.
+ */
+export function topArtists(plays: Plays, since = 0, limit = 8) {
+  type Acc = { n: number; spellings: Map<string, number>; art?: string; best: number };
+  const by = new Map<string, Acc>();
+  for (const { track, n } of mostPlayed(plays, since, Infinity))
+    for (const name of artistsOf(track.artist)) {
+      const key = name.toLowerCase();
+      const a: Acc = by.get(key) ?? { n: 0, spellings: new Map(), best: 0 };
+      a.n += n;
+      a.spellings.set(name, (a.spellings.get(name) ?? 0) + n);
+      if (n > a.best) {
+        a.best = n;
+        a.art = track.artwork;
+      }
+      by.set(key, a);
+    }
+  return [...by.values()]
+    .map((a) => ({
+      name: [...a.spellings].sort((x, y) => y[1] - x[1])[0][0],
+      n: a.n,
+      art: a.art,
+    }))
+    .sort((a, b) => b.n - a.n)
+    .slice(0, limit);
+}
+
 /* ---------- Playlists: localStorage, no server ---------- */
 
 const PL_KEY = 'playlists';

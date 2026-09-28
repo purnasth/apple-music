@@ -40,6 +40,12 @@ import {
   removeTrack,
   getPlaylists,
   getRecent,
+  getPlays,
+  recordPlay,
+  mostPlayed,
+  topArtists,
+  monthStart,
+  Plays,
   getSession,
   current,
   pushRecent,
@@ -117,12 +123,14 @@ export default function Home() {
   // A playlist that arrived in a link — held aside until it is explicitly saved.
   const [shared, setShared] = useState<Detail | null>(null);
   const [sharedOpen, setSharedOpen] = useState(false);
+  const [smartOpen, setSmartOpen] = useState(false);
   const [addTo, setAddTo] = useState<Track | null>(null);
 
   const [queue, setQueue] = useState<Track[]>([]);
   const [qIndex, setQIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [recent, setRecent] = useState<Track[]>([]);
+  const [plays, setPlays] = useState<Plays>({});
 
   const [scrolled, setScrolled] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
@@ -134,6 +142,7 @@ export default function Home() {
       setLibrary(lib);
       setLoaded(true);
       setRecent(current(getRecent(), lib));
+      setPlays(getPlays());
       setPlaylists((p) =>
         Object.fromEntries(Object.entries(p).map(([n, ts]) => [n, current(ts, lib)])),
       );
@@ -585,18 +594,66 @@ export default function Home() {
     });
   };
 
+  /** Opens an artist or album in the library, or searches the catalogue for one it lacks. */
+  const goTo = (kind: "artist" | "album", name: string) => {
+    const needle = name.toLowerCase();
+    const inLib = library.some((t) =>
+      kind === "album"
+        ? t.album.toLowerCase() === needle
+        : artistsOf(t.artist).some((a) => a.toLowerCase() === needle),
+    );
+    if (!inLib) {
+      setTab("search");
+      setQuery(name);
+    } else {
+      setTab("library");
+      setFolder(null);
+      setArtist(kind === "artist" ? name : "");
+      setFilter(kind === "album" ? name : "");
+    }
+    window.scrollTo({ top: 0 });
+  };
+
   const openDetail = (d: Detail | null) => {
     setSharedOpen(!!d?.shared);
-    setActive(d && !d.shared ? d.name : null);
+    setSmartOpen(!!d?.smart);
+    setActive(d && !d.shared && !d.smart ? d.name : null);
   };
+
+  // Most Played is kept by listening, not by hand; tracks refresh from the
+  // library so an imported song's artwork is this session's.
+  const top = mostPlayed(plays);
+  const counts = new Map(top.map((x) => [x.track.id, x.n]));
+  const smart: Detail | null = top.length
+    ? {
+        name: "Most Played",
+        tracks: current(top.map((x) => x.track), library),
+        smart: true,
+      }
+    : null;
+
+  const since = monthStart();
+  const month = mostPlayed(plays, since, Infinity);
+  const monthStats = month.length
+    ? {
+        label: new Date().toLocaleString(undefined, { month: "long" }),
+        plays: month.reduce((n, x) => n + x.n, 0),
+        minutes: Math.round(
+          month.reduce((m, x) => m + x.n * (x.track.duration ?? 0), 0) / 60,
+        ),
+        artists: topArtists(plays, since),
+      }
+    : null;
 
   // Derived, not stored, so the open playlist tracks its own edits.
   const detail: Detail | null =
     sharedOpen && shared
       ? shared
-      : active && playlists[active]
-        ? { name: active, tracks: playlists[active] }
-        : null;
+      : smartOpen && smart
+        ? smart
+        : active && playlists[active]
+          ? { name: active, tracks: playlists[active] }
+          : null;
 
   const onFiles = useCallback(async (files: File[]) => {
     const audio = files.filter(
@@ -1098,6 +1155,9 @@ export default function Home() {
             queue={queue}
             playing={playing}
             onToggle={() => setPlaying(!playing)}
+            smart={smart}
+            month={monthStats}
+            onArtist={(name) => goTo("artist", name)}
           />
         )}
 
@@ -1152,7 +1212,13 @@ export default function Home() {
                 if (all) play(all, all.findIndex((t) => t.id === track.id));
                 else play(shown, i);
               }}
-              snippet={tab === "search" ? snippets.get(track.id) : undefined}
+              note={
+                tab === "search" && snippets.has(track.id) ? (
+                  <i>“{snippets.get(track.id)}”</i>
+                ) : detail?.smart && counts.has(track.id) ? (
+                  `${counts.get(track.id)} play${counts.get(track.id) === 1 ? "" : "s"}`
+                ) : undefined
+              }
               onAddTo={() => setAddTo(track)}
               onRemove={
                 // Bundled tracks ship with the site; removeTrack can't evict one, it would just reappear.
@@ -1245,24 +1311,8 @@ export default function Home() {
         playing={playing}
         setPlaying={setPlaying}
         onAddTo={setAddTo}
-        onGoTo={(kind, name) => {
-          const needle = name.toLowerCase();
-          const inLib = library.some((t) =>
-            kind === "album"
-              ? t.album.toLowerCase() === needle
-              : artistsOf(t.artist).some((a) => a.toLowerCase() === needle),
-          );
-          if (!inLib) {
-            setTab("search");
-            setQuery(name);
-          } else {
-            setTab("library");
-            setFolder(null);
-            setArtist(kind === "artist" ? name : "");
-            setFilter(kind === "album" ? name : "");
-          }
-          window.scrollTo({ top: 0 });
-        }}
+        onGoTo={goTo}
+        onPlayed={(t) => setPlays(recordPlay(t))}
       />
 
       {/* Primary navigation lives at the foot of the screen on a phone, where a thumb
@@ -1423,7 +1473,7 @@ function Row({
   onPlay,
   onAddTo,
   onRemove,
-  snippet,
+  note,
 }: {
   track: Track;
   active: boolean;
@@ -1431,8 +1481,8 @@ function Row({
   onPlay: () => void;
   onAddTo: () => void;
   onRemove?: () => void;
-  /** The lyric line a search matched. */
-  snippet?: string;
+  /** A third line: the lyric a search matched, or a play count. */
+  note?: React.ReactNode;
 }) {
   return (
     <li className="group relative flex items-center gap-3 rounded-control px-1 py-1 transition hover:bg-fill">
@@ -1485,10 +1535,8 @@ function Row({
           {track.artist}
           {track.album ? ` — ${track.album}` : ""}
         </div>
-        {snippet && (
-          <div className="truncate text-[11px] italic text-label-3">
-            “{snippet}”
-          </div>
+        {note && (
+          <div className="truncate text-[11px] text-label-3">{note}</div>
         )}
       </button>
 
