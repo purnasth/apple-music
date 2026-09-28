@@ -29,6 +29,7 @@ import {
   TbPlayerTrackNextFilled,
   TbPlaylist,
   TbRepeat,
+  TbRepeatOnce,
   TbVolume,
   TbVolumeOff,
   TbX,
@@ -36,6 +37,7 @@ import {
 import { Logo } from "@/components/Logo";
 import { toast } from "@/lib/toast";
 import {
+  Repeat,
   Track,
   artistsOf,
   audioSrc,
@@ -97,7 +99,9 @@ export default function Player({
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(init?.volume ?? 1);
   const [muted, setMuted] = useState(init?.muted ?? false);
-  const [repeat, setRepeat] = useState(init?.repeat ?? false);
+  const [repeat, setRepeat] = useState<Repeat>(
+    init?.repeat === "one" ? "one" : "all",
+  );
   const [shuffle, setShuffle] = useState(init?.shuffle ?? false);
   const [error, setError] = useState<string | null>(null);
   const [full, setFull] = useState(false);
@@ -141,10 +145,13 @@ export default function Player({
   };
 
   const toggleRepeat = () => {
-    setRepeat(!repeat);
-    toast(repeat ? "Repeat off" : "Repeat on", {
+    const one = repeat !== "one";
+    setRepeat(one ? "one" : "all");
+    toast(one ? "Repeat one" : "Repeat one off", {
       id: "repeat",
-      description: repeat ? undefined : "The queue starts over at the end.",
+      description: one
+        ? "This song plays on a loop."
+        : "The queue plays on and starts over at the end.",
     });
   };
 
@@ -230,9 +237,13 @@ export default function Player({
   const step = (delta: 1 | -1) => {
     if (!queue.length) return;
     const at = Math.max(here, 0) + delta;
-    if (at >= path.length)
-      return repeat ? go(path[0], "next") : setPlaying(false);
-    go(path[at < 0 ? path.length - 1 : at], delta > 0 ? "next" : "prev");
+    const to = path[(at + path.length) % path.length];
+    const a = audioRef.current;
+    if (to === index && a) {
+      a.currentTime = 0;
+      return void a.play().catch(() => setPlaying(false));
+    }
+    go(to, delta > 0 ? "next" : "prev");
   };
 
   const next = () => step(1);
@@ -579,6 +590,7 @@ export default function Player({
           const b = e.currentTarget.buffered;
           if (b.length) setBuffered(b.end(b.length - 1));
         }}
+        loop={repeat === "one"}
         onEnded={next}
         onError={() => fail("Playback failed.")}
       />
@@ -751,9 +763,7 @@ export default function Player({
                   <TbPlayerTrackNextFilled />
                 </Btn>
                 <span className="hidden sm:block">
-                  <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
-                    <TbRepeat />
-                  </Btn>
+                  <RepeatBtn repeat={repeat} onClick={toggleRepeat} />
                 </span>
               </div>
               <span
@@ -1185,6 +1195,23 @@ function TrackMenu({
   );
 }
 
+function RepeatBtn({
+  repeat,
+  onClick,
+  size,
+}: {
+  repeat: Repeat;
+  onClick: () => void;
+  size?: number;
+}) {
+  const Icon = repeat === "one" ? TbRepeatOnce : TbRepeat;
+  return (
+    <Btn onClick={onClick} active={repeat === "one"} label="Repeat one">
+      <Icon size={size} />
+    </Btn>
+  );
+}
+
 /** Fills the page (not the browser) — the cover blurred behind itself, queue on the left. */
 function FullView({
   track,
@@ -1242,7 +1269,7 @@ function FullView({
   prev: () => void;
   shuffle: boolean;
   toggleShuffle: () => void;
-  repeat: boolean;
+  repeat: Repeat;
   toggleRepeat: () => void;
   volume: number;
   setVolume: (v: number) => void;
@@ -1608,9 +1635,7 @@ function FullView({
                   <Btn onClick={next} label="Next">
                     <TbPlayerTrackNextFilled size={20} />
                   </Btn>
-                  <Btn onClick={toggleRepeat} active={repeat} label="Repeat">
-                    <TbRepeat size={20} />
-                  </Btn>
+                  <RepeatBtn repeat={repeat} onClick={toggleRepeat} size={20} />
                 </div>
                 <Volume
                   volume={volume}
