@@ -5,6 +5,7 @@ import {
   Fragment,
   RefObject,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -61,12 +62,44 @@ import Image from "next/image";
 // The queue waits on this: a scroll under the view-transition snapshot is never seen.
 let trackFade: Promise<unknown> = Promise.resolve();
 
+const FADES = [0, 3, 6, 9, 12];
+const QUIET_MS = 300;
+
+/** Albums that play straight through (live sets, mixes) must not be faded over. */
+const sameAlbum = (a: Track, b: Track) =>
+  !!a.album && a.album === b.album && !/ - Single$/i.test(a.album);
+
+const makeAudio = () => {
+  const a = new Audio();
+  // Without CORS mode Web Audio outputs silence; every source here allows
+  // it (same-origin /songs, blob: imports, Deezer's CDN sends ACAO *).
+  a.crossOrigin = "anonymous";
+  a.preload = "auto";
+  return a;
+};
+
+// Two elements that trade places: the idle one preloads the next song, so a
+// track change starts at once and a crossfade has something to fade into.
+// iOS pins media volume at 1, so there is no fading there, and it won't start a
+// second element under the lock screen, so it keeps one.
+let POOL: HTMLAudioElement[] | null = null;
+const audioPool = () => {
+  if (typeof window === "undefined") return [];
+  if (POOL) return POOL;
+  const probe = new Audio();
+  probe.volume = 0.5;
+  POOL = probe.volume === 0.5 ? [makeAudio(), makeAudio()] : [makeAudio()];
+  return POOL;
+};
+
 /** Feeds the styled range its filled (and buffered) proportion; see .range in globals.css. */
 const filled = (value: number, max: number, buffered = 0) =>
   ({
     "--range-pct": `${max > 0 ? (value / max) * 100 : 0}%`,
     "--buffered-pct": `${max > 0 ? (buffered / max) * 100 : 0}%`,
   }) as CSSProperties;
+
+type Fader = { secs: number; set: (s: number) => void };
 
 type Props = {
   queue: Track[];
@@ -87,9 +120,24 @@ export default function Player({
   onAddTo,
   onGoTo,
 }: Props) {
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(audioPool()[0] ?? null);
   const graph = useRef<{ ctx: AudioContext; an: AnalyserNode } | null>(null);
-  const objectUrl = useRef<string | null>(null);
+  const blobs = useRef(new Map<HTMLAudioElement, string>());
+  const fade = useRef<{
+    from: HTMLAudioElement;
+    to: HTMLAudioElement;
+    secs: number;
+    elapsed: number;
+    id: number;
+  } | null>(null);
+  const quiet = useRef(new Set<HTMLAudioElement>());
+  const handoff = useRef(false);
+  const swapped = useRef<{
+    from: HTMLAudioElement;
+    blend: boolean;
+    ready: boolean;
+  } | null>(null);
+  const [fadeDone, setFadeDone] = useState(0);
   // The saved session seeds settings; the queue itself is restored by the page.
   const [init] = useState(getSession);
   const resume = useRef(init?.time ?? null);
@@ -98,6 +146,8 @@ export default function Player({
   const [dur, setDur] = useState(0);
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(init?.volume ?? 1);
+  const volRef = useRef(volume);
+  const [crossfade, setCrossfade] = useState(init?.crossfade ?? 6);
   const [muted, setMuted] = useState(init?.muted ?? false);
   const [repeat, setRepeat] = useState<Repeat>(
     init?.repeat === "one" ? "one" : "all",
@@ -118,7 +168,6 @@ export default function Player({
     [order, queue],
   );
   const here = path.indexOf(index);
-  const hasAudio = !!track;
   const artLum = useArtTone(track?.artwork).lum;
   const lyricsless = !!track && noLyrics === track.id;
   const lyricsChecking = !!track && lyricsChecked !== track.id;
@@ -135,6 +184,85 @@ export default function Player({
       id: "playback",
       description: track ? `${track.title} — ${track.artist}` : undefined,
     });
+  };
+
+  const spareOf = (a: HTMLAudioElement | null) =>
+    audioPool().find((x) => x !== a) ?? null;
+
+  const setSrc = (a: HTMLAudioElement, src: string, id: string) => {
+    const old = blobs.current.get(a);
+    if (old && old !== src) URL.revokeObjectURL(old);
+    if (src.startsWith("blob:")) blobs.current.set(a, src);
+    else blobs.current.delete(a);
+    a.src = src;
+    a.dataset.id = id;
+  };
+
+  const endFade = () => {
+    const f = fade.current;
+    if (!f) return;
+    clearInterval(f.id);
+    f.from.pause();
+    // The incoming song keeps its level: a skip mid-fade eases it out from there.
+    f.from.volume = volRef.current;
+    fade.current = null;
+    setFadeDone((n) => n + 1);
+  };
+
+  const runFade = () => {
+    const f = fade.current;
+    if (!f) return;
+    const t0 = performance.now() - f.elapsed * 1000;
+    clearInterval(f.id);
+    // An interval, not animation frames: those stop in a background tab.
+    f.id = window.setInterval(() => {
+      f.elapsed = (performance.now() - t0) / 1000;
+      const p = Math.min(f.elapsed / f.secs, 1);
+      f.to.volume = volRef.current * Math.sin((p * Math.PI) / 2);
+      f.from.volume = volRef.current * Math.cos((p * Math.PI) / 2);
+      if (p >= 1) endFade();
+    }, 50);
+  };
+
+  /** Equal-power fade from the song that is ending into the one starting. */
+  const startFade = (from: HTMLAudioElement, to: HTMLAudioElement) => {
+    const secs = Math.max((from.duration || 0) - from.currentTime, 0.5);
+    to.volume = 0;
+    fade.current = { from, to, secs, elapsed: 0, id: 0 };
+    runFade();
+  };
+
+  /** Pausing holds both songs where they are, and playing picks the fade back up. */
+  const holdFade = () => {
+    const f = fade.current;
+    if (!f) return;
+    clearInterval(f.id);
+    f.from.pause();
+  };
+  const resumeFade = () => {
+    const f = fade.current;
+    if (!f) return;
+    f.from.play().catch(endFade);
+    runFade();
+  };
+
+  /** A skip eases the song being left out, rather than cutting it mid-note. */
+  const quietOut = (a: HTMLAudioElement) => {
+    if (a.paused) return;
+    quiet.current.add(a);
+    const v0 = a.volume;
+    const t0 = performance.now();
+    const id = setInterval(() => {
+      const p = Math.min((performance.now() - t0) / QUIET_MS, 1);
+      // Skipped straight back to it: it is the song again, at full volume.
+      const back = a === audioRef.current;
+      if (!back && p < 1) return void (a.volume = v0 * (1 - p));
+      clearInterval(id);
+      quiet.current.delete(a);
+      if (!back) a.pause();
+      a.volume = volRef.current;
+      setFadeDone((n) => n + 1);
+    }, 20);
   };
 
   /** Shuffle and repeat answer to S and R as well as to the buttons, and a
@@ -223,7 +351,9 @@ export default function Player({
   useEffect(() => {
     const path = order ?? queue.map((_, i) => i);
     const nxt = queue[path[path.indexOf(index) + 1]];
-    if (nxt?.preview?.startsWith("/songs/")) fetch(nxt.preview).catch(() => {});
+    // With two elements the idle one downloads it anyway; fetching too would double it.
+    if (audioPool().length < 2 && nxt?.preview?.startsWith("/songs/"))
+      fetch(nxt.preview).catch(() => {});
     if (showLyrics && nxt) getLyrics(nxt).catch(() => {});
     // Both neighbours' covers, so a skip fades into artwork, not an empty square.
     if (full)
@@ -232,6 +362,25 @@ export default function Player({
         if (art) document.createElement("img").src = art;
       }
   }, [index, order, queue, showLyrics, full]);
+
+  // The idle element loads the song after this one, once no fade is using it.
+  useEffect(() => {
+    const spare = spareOf(audioRef.current);
+    const nxt = repeat === "one" ? null : queue[path[(here + 1) % path.length]];
+    if (!spare || !nxt || nxt.id === track?.id) return;
+    if (fade.current || quiet.current.has(spare)) return;
+    if (spare.dataset.id === nxt.id && !spare.error) return;
+    let gone = false;
+    audioSrc(nxt)
+      .then((src) => {
+        if (gone || !src || fade.current || quiet.current.has(spare)) return;
+        if (spare === audioRef.current) return;
+        setSrc(spare, src, nxt.id);
+      })
+      .catch(() => {});
+    return () => void (gone = true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, path, queue, repeat, fadeDone]);
 
   /** Walk the play order, which is the shuffled one when shuffle is on. */
   const step = (delta: 1 | -1) => {
@@ -274,8 +423,26 @@ export default function Player({
     analyser: graph,
   });
 
-  // Load the source whenever the track changes. Local tracks come out of IndexedDB
-  // as an object URL, so the previous one gets revoked to avoid leaking blobs.
+  // A layout effect so the swap lands before any child's effect reads audioRef.
+  useLayoutEffect(() => {
+    const cur = audioRef.current;
+    const spare = spareOf(cur);
+    const blend = handoff.current;
+    handoff.current = false;
+    endFade();
+    if (!track || !cur || !spare) return;
+    // Every change moves to the other element, so the one left can fade out.
+    audioRef.current = spare;
+    swapped.current = {
+      from: cur,
+      blend,
+      ready: spare.dataset.id === track.id && !spare.error,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track?.id]);
+
+  // Load the source whenever the track changes, unless the idle element already
+  // has it. Local tracks come out of IndexedDB as object URLs, revoked in setSrc.
   useEffect(() => {
     let cancelled = false;
     setError(null);
@@ -283,14 +450,45 @@ export default function Player({
     setBuffered(0);
     if (!track) return;
 
+    const swap = swapped.current;
+    swapped.current = null;
+    const el = audioRef.current!;
+    if (swap) {
+      if (swap.blend && swap.ready && playing) startFade(swap.from, el);
+      else {
+        quietOut(swap.from);
+        el.volume = volRef.current;
+      }
+    }
+    // A browser that wants a gesture per element can refuse the idle one; the
+    // one that was playing is allowed, so the song moves back into it.
+    const moveBack = () => {
+      if (!swap || audioRef.current !== el || !el.src) return setPlaying(false);
+      endFade();
+      const src = el.src;
+      blobs.current.delete(el);
+      el.removeAttribute("src");
+      el.dataset.id = "";
+      audioRef.current = swap.from;
+      setSrc(swap.from, src, track.id);
+      swap.from.volume = volRef.current;
+      swap.from.play().catch(() => setPlaying(false));
+    };
+    if (swap?.ready) {
+      if (el.paused) el.currentTime = 0;
+      setDur(el.duration || 0);
+      setLoading(false);
+      saveSessionTime(track.id, 0);
+      if (playing) el.play().catch(moveBack);
+      return;
+    }
+
     setLoading(true);
     audioSrc(track)
       .then((src) => {
         if (cancelled || !audioRef.current) return;
         if (!src) return fail("No playable audio for this track.");
-        if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-        objectUrl.current = src.startsWith("blob:") ? src : null;
-        audioRef.current.src = src;
+        setSrc(audioRef.current, src, track.id);
         // Restored session: pick up at the saved position, but only in the very
         // track it was saved for. Any other load starts the clock over.
         const r = resume.current;
@@ -301,7 +499,7 @@ export default function Player({
         } else {
           saveSessionTime(track.id, 0);
         }
-        if (playing) audioRef.current.play().catch(() => setPlaying(false));
+        if (playing) audioRef.current.play().catch(moveBack);
       })
       .catch(
         (e) =>
@@ -319,8 +517,13 @@ export default function Player({
   useEffect(() => {
     const a = audioRef.current;
     if (!a || !a.src) return;
-    if (playing) a.play().catch(() => setPlaying(false));
-    else a.pause();
+    if (playing) {
+      a.play().catch(() => setPlaying(false));
+      resumeFade();
+    } else {
+      holdFade();
+      a.pause();
+    }
     if ("mediaSession" in navigator)
       navigator.mediaSession.playbackState = playing ? "playing" : "paused";
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -338,7 +541,7 @@ export default function Player({
         an.fftSize = 1024;
         // Onset detection needs the raw jump between frames.
         an.smoothingTimeConstant = 0;
-        ctx.createMediaElementSource(a).connect(an);
+        for (const el of audioPool()) ctx.createMediaElementSource(el).connect(an);
         an.connect(ctx.destination);
         graph.current = { ctx, an };
       } catch {}
@@ -346,22 +549,28 @@ export default function Player({
     graph.current?.ctx.resume().catch(() => {});
   }, [full, mini.window, playing]);
 
-  // The <audio> only mounts once there is a track, after the restored settings
-  // first run, so they are applied again when it appears.
+  // A running fade sets volumes itself, reading volRef as it goes.
   useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume;
-  }, [volume, hasAudio]);
+    volRef.current = volume;
+    if (fade.current) return;
+    for (const a of audioPool()) if (!quiet.current.has(a)) a.volume = volume;
+  }, [volume]);
 
   useEffect(() => {
-    if (audioRef.current) audioRef.current.muted = muted;
-  }, [muted, hasAudio]);
+    for (const a of audioPool()) a.muted = muted;
+  }, [muted]);
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.loop = repeat === "one";
+  }, [repeat, track?.id]);
 
   // Persist the session as it changes, so the next visit resumes it (Spotify-style).
   // Playback position goes through saveSessionTime instead — see onTimeUpdate.
   useEffect(() => {
-    if (track) saveSession({ queue, index, volume, muted, shuffle, repeat });
+    if (track)
+      saveSession({ queue, index, volume, muted, shuffle, repeat, crossfade });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queue, index, volume, muted, shuffle, repeat]);
+  }, [queue, index, volume, muted, shuffle, repeat, crossfade]);
 
   // The exact position on the way out — tab close, reload, navigation.
   useEffect(() => {
@@ -409,11 +618,80 @@ export default function Player({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track, index, queue, shuffle, repeat]);
 
-  useEffect(
-    () => () =>
-      void (objectUrl.current && URL.revokeObjectURL(objectUrl.current)),
-    [],
+  // The elements live outside the page, so their events are wired here, and
+  // only the playing one is listened to: the idle or fading one is not the track.
+  const on = useRef<Partial<Record<string, (a: HTMLAudioElement) => void>>>(
+    {},
   );
+  useEffect(() => {
+    on.current = {
+      timeupdate: (a) => {
+        setTime(a.currentTime);
+        // Checkpoint the position every few seconds; pagehide catches the rest.
+        if (Math.abs(a.currentTime - lastSaved.current) > 5) {
+          lastSaved.current = a.currentTime;
+          saveSessionTime(track!.id, a.currentTime);
+        }
+        if ("mediaSession" in navigator && isFinite(a.duration))
+          navigator.mediaSession.setPositionState({
+            duration: a.duration,
+            position: Math.min(a.currentTime, a.duration),
+            playbackRate: a.playbackRate,
+          });
+        const left = a.duration - a.currentTime;
+        const spare = spareOf(a);
+        const nxt = queue[path[(here + 1) % path.length]];
+        if (
+          crossfade &&
+          spare &&
+          nxt &&
+          !sameAlbum(track!, nxt) &&
+          !a.paused &&
+          !a.loop &&
+          !handoff.current &&
+          !fade.current &&
+          a.duration > crossfade * 2 &&
+          left <= crossfade &&
+          spare.dataset.id === nxt.id &&
+          !spare.error
+        ) {
+          handoff.current = true;
+          next();
+        }
+      },
+      loadedmetadata: (a) => setDur(a.duration),
+      progress: (a) => {
+        const b = a.buffered;
+        if (b.length) setBuffered(b.end(b.length - 1));
+      },
+      ended: (a) => {
+        // Start the preloaded song now; the swap and the view transition follow.
+        const spare = spareOf(a);
+        const nxt = queue[path[(here + 1) % path.length]];
+        if (spare && spare.dataset.id === nxt?.id && !spare.error)
+          spare.play().catch(() => {});
+        next();
+      },
+      error: () => fail("Playback failed."),
+    };
+  });
+  useEffect(() => {
+    const offs = audioPool().flatMap((a) =>
+      ["timeupdate", "loadedmetadata", "progress", "ended", "error"].map(
+        (type) => {
+          const h = () => a === audioRef.current && on.current[type]?.(a);
+          a.addEventListener(type, h);
+          return () => a.removeEventListener(type, h);
+        },
+      ),
+    );
+    const urls = blobs.current;
+    return () => {
+      offs.forEach((off) => off());
+      for (const a of audioPool()) a.pause();
+      for (const url of urls.values()) URL.revokeObjectURL(url);
+    };
+  }, []);
 
   // The bindings YouTube, Spotify and Apple Music agree on, and YouTube's where
   // they differ — see lib/shortcuts.ts for the list this implements. They work
@@ -563,38 +841,6 @@ export default function Player({
 
   return (
     <>
-      {/* Stays mounted across the view switch — remounting it would restart the track. */}
-      <audio
-        ref={audioRef}
-        // Without CORS mode Web Audio outputs silence; every source here allows
-        // it (same-origin /songs, blob: imports, Deezer's CDN sends ACAO *).
-        crossOrigin="anonymous"
-        preload="auto"
-        onTimeUpdate={(e) => {
-          const a = e.currentTarget;
-          setTime(a.currentTime);
-          // Checkpoint the position every few seconds; pagehide catches the rest.
-          if (Math.abs(a.currentTime - lastSaved.current) > 5) {
-            lastSaved.current = a.currentTime;
-            saveSessionTime(track.id, a.currentTime);
-          }
-          if ("mediaSession" in navigator && isFinite(a.duration))
-            navigator.mediaSession.setPositionState({
-              duration: a.duration,
-              position: Math.min(a.currentTime, a.duration),
-              playbackRate: a.playbackRate,
-            });
-        }}
-        onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
-        onProgress={(e) => {
-          const b = e.currentTarget.buffered;
-          if (b.length) setBuffered(b.end(b.length - 1));
-        }}
-        loop={repeat === "one"}
-        onEnded={next}
-        onError={() => fail("Playback failed.")}
-      />
-
       {mini.portal}
 
       {full && (
@@ -640,6 +886,11 @@ export default function Player({
           onClose={() => setFull(false)}
           onMini={mini.supported ? mini.toggle : undefined}
           mini={mini.isOpen}
+          fader={
+            audioPool().length > 1
+              ? { secs: crossfade, set: setCrossfade }
+              : undefined
+          }
         />
       )}
 
@@ -955,6 +1206,7 @@ function TrackMenu({
   queueLen,
   onAddTo,
   onGoTo,
+  fader,
 }: {
   track: Track;
   dur: number;
@@ -962,6 +1214,7 @@ function TrackMenu({
   queueLen: number;
   onAddTo: () => void;
   onGoTo: (kind: "artist" | "album", name: string) => void;
+  fader?: Fader;
 }) {
   const [open, setOpen] = useState(false);
   // Opens toward whichever half of the screen has more room, capped to fit it.
@@ -1105,7 +1358,7 @@ function TrackMenu({
           style={{ maxHeight: room.max }}
           className={`absolute right-0 z-30 w-72 overflow-y-auto overscroll-contain rounded-2xl ${room.up ? "bottom-full mb-2" : "top-full mt-2"} bg-black/75 text-left shadow-2xl ring-1 ring-white/10 backdrop-blur-2xl`}
         >
-          <div className="flex flex-wrap gap-1.5 border-b border-white/10 px-4 py-3">
+          <div className="flex flex-wrap gap-1.5 border-b border-white/10 p-4">
             {chips.map((c) => (
               <span
                 key={c}
@@ -1189,6 +1442,34 @@ function TrackMenu({
               </>
             )}
           </div>
+          {fader && (
+            <div className="flex items-center gap-3 border-t border-white/10 p-4">
+              <span id="crossfade" className="text-xs text-white/60">
+                Crossfade
+              </span>
+              <div
+                role="radiogroup"
+                aria-labelledby="crossfade"
+                className="flex flex-1 rounded-lg bg-white/10"
+              >
+                {FADES.map((s) => (
+                  <button
+                    key={s}
+                    role="radio"
+                    aria-checked={fader.secs === s}
+                    onClick={() => fader.set(s)}
+                    className={`flex-1 rounded-md py-0.5 text-xxs tabular-nums transition ${
+                      fader.secs === s
+                        ? "bg-white/25 font-semibold"
+                        : "text-white/70 hover:text-white"
+                    }`}
+                  >
+                    {s ? `${s}s` : "Off"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1252,6 +1533,7 @@ function FullView({
   onClose,
   onMini,
   mini,
+  fader,
 }: {
   track: Track;
   queue: Track[];
@@ -1291,6 +1573,7 @@ function FullView({
   onClose: () => void;
   onMini?: () => void;
   mini: boolean;
+  fader?: Fader;
 }) {
   const art = track.artworkLarge ?? track.artwork;
   const { lum, hue } = useArtTone(art);
@@ -1562,6 +1845,7 @@ function FullView({
                     queueLen={queueLen}
                     onAddTo={onAddTo}
                     onGoTo={onGoTo}
+                    fader={fader}
                   />
                 </div>
               </div>
