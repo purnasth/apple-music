@@ -13,6 +13,7 @@ import {
 import {
   TbArrowsMaximize,
   TbArrowsShuffle,
+  TbCast,
   TbChevronDown,
   TbChevronLeft,
   TbDots,
@@ -63,6 +64,12 @@ import Image from "next/image";
 let trackFade: Promise<unknown> = Promise.resolve();
 
 const FADES = [0, 3, 6, 9, 12];
+
+/** Safari hands media to AirPlay, everything else to Cast. */
+const CAST_LABEL = () =>
+  typeof window !== "undefined" && "WebKitPlaybackTargetAvailabilityEvent" in window
+    ? "AirPlay"
+    : "Play on a speaker or TV";
 const QUIET_MS = 300;
 
 /** Albums that play straight through (live sets, mixes) must not be faded over. */
@@ -141,6 +148,12 @@ export default function Player({
     ready: boolean;
   } | null>(null);
   const [fadeDone, setFadeDone] = useState(0);
+  const [castReady, setCastReady] = useState(false);
+  const [castState, setCastState] = useState<
+    "disconnected" | "connecting" | "connected"
+  >("disconnected");
+  // A cast belongs to one element, so while one runs the other is left alone.
+  const casting = useRef(false);
   // The saved session seeds settings; the queue itself is restored by the page.
   const [init] = useState(getSession);
   const resume = useRef(init?.time ?? null);
@@ -372,7 +385,7 @@ export default function Player({
     const spare = spareOf(audioRef.current);
     const nxt = repeat === "one" ? null : queue[path[(here + 1) % path.length]];
     if (!spare || !nxt || nxt.id === track?.id) return;
-    if (fade.current || quiet.current.has(spare)) return;
+    if (fade.current || quiet.current.has(spare) || casting.current) return;
     if (spare.dataset.id === nxt.id && !spare.error) return;
     let gone = false;
     audioSrc(nxt)
@@ -434,7 +447,7 @@ export default function Player({
     const blend = handoff.current;
     handoff.current = false;
     endFade();
-    if (!track || !cur || !spare) return;
+    if (!track || !cur || !spare || casting.current) return;
     // Every change moves to the other element, so the one left can fade out.
     audioRef.current = spare;
     swapped.current = {
@@ -662,6 +675,7 @@ export default function Player({
           !a.loop &&
           !handoff.current &&
           !fade.current &&
+          !casting.current &&
           a.duration > crossfade * 2 &&
           left <= crossfade &&
           spare.dataset.id === nxt.id &&
@@ -680,7 +694,7 @@ export default function Player({
         // Start the preloaded song now; the swap and the view transition follow.
         const spare = spareOf(a);
         const nxt = queue[path[(here + 1) % path.length]];
-        if (spare && spare.dataset.id === nxt?.id && !spare.error)
+        if (spare && spare.dataset.id === nxt?.id && !spare.error && !casting.current)
           spare.play().catch(() => {});
         next();
       },
@@ -704,6 +718,55 @@ export default function Player({
       for (const url of urls.values()) URL.revokeObjectURL(url);
     };
   }, []);
+
+  // Speakers and TVs the browser can hand the song to: AirPlay in Safari, Cast
+  // in Chrome. The button only shows when one is in reach, as in every player.
+  useEffect(() => {
+    const els = audioPool().filter((a) => "remote" in a);
+    const seen = new Set<HTMLAudioElement>();
+    const offs: (() => void)[] = [];
+    for (const a of els) {
+      a.remote
+        .watchAvailability((ok) => {
+          if (ok) seen.add(a);
+          else seen.delete(a);
+          setCastReady(seen.size > 0);
+        })
+        .then((id) =>
+          offs.push(() => void a.remote.cancelWatchAvailability(id).catch(() => {})),
+        )
+        // Some browsers can prompt but not watch; the picker says if nothing is there.
+        .catch(() => setCastReady(true));
+      const state = () => {
+        casting.current = a.remote.state !== "disconnected";
+        setCastState(a.remote.state);
+        if (a.remote.state === "connected")
+          toast.success("Playing on another device", { id: "cast" });
+        else if (a.remote.state === "disconnected")
+          toast("Back on this device", { id: "cast" });
+      };
+      for (const type of ["connecting", "connect", "disconnect"]) {
+        a.remote.addEventListener(type, state);
+        offs.push(() => a.remote.removeEventListener(type, state));
+      }
+    }
+    return () => offs.forEach((off) => off());
+  }, []);
+
+  const castable = castReady || castState !== "disconnected";
+  const castTo = () =>
+    audioRef.current?.remote.prompt().catch((e: Error) => {
+      if (e.name === "NotFoundError")
+        toast("No speakers or TVs found", {
+          id: "cast",
+          description: "They need to be on the same network as this device.",
+        });
+      else if (e.name === "NotSupportedError")
+        toast("This song can't be cast", {
+          id: "cast",
+          description: "Imported files stay on the device that imported them.",
+        });
+    });
 
   // The bindings YouTube, Spotify and Apple Music agree on, and YouTube's where
   // they differ — see lib/shortcuts.ts for the list this implements. They work
@@ -898,6 +961,11 @@ export default function Player({
           onClose={() => setFull(false)}
           onMini={mini.supported ? mini.toggle : undefined}
           mini={mini.isOpen}
+          cast={
+            castable
+              ? { on: castState === "connected", open: castTo }
+              : undefined
+          }
           fader={
             audioPool().length > 1
               ? { secs: crossfade, set: setCrossfade }
@@ -1042,6 +1110,16 @@ export default function Player({
                   iconSize={14}
                   overContent
                 />
+                {castable && (
+                  <Btn
+                    onClick={castTo}
+                    active={castState === "connected"}
+                    busy={castState === "connecting" && "Connecting…"}
+                    label={CAST_LABEL()}
+                  >
+                    <TbCast />
+                  </Btn>
+                )}
                 {mini.supported && (
                   <Btn
                     onClick={mini.toggle}
@@ -1546,6 +1624,7 @@ function FullView({
   onMini,
   mini,
   fader,
+  cast,
 }: {
   track: Track;
   queue: Track[];
@@ -1586,6 +1665,7 @@ function FullView({
   onMini?: () => void;
   mini: boolean;
   fader?: Fader;
+  cast?: { on: boolean; open: () => void };
 }) {
   const art = track.artworkLarge ?? track.artwork;
   const { lum, hue } = useArtTone(art);
@@ -1837,6 +1917,19 @@ function FullView({
                   {error && <p className="mt-1 text-sm text-accent">{error}</p>}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  {cast && (
+                    <button
+                      onClick={cast.open}
+                      aria-label={CAST_LABEL()}
+                      aria-pressed={cast.on}
+                      title={CAST_LABEL()}
+                      className={`grid h-9 w-9 place-items-center rounded-full backdrop-blur-xl transition hover:bg-white/25 active:scale-95 ${
+                        cast.on ? "bg-white/30" : "bg-white/15"
+                      }`}
+                    >
+                      <TbCast size={18} />
+                    </button>
+                  )}
                   {onMini && (
                     <button
                       onClick={onMini}
