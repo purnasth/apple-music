@@ -56,6 +56,9 @@ import { Backdrop, Btn, useArtTone } from "./PlayerKit";
 import { flushSync } from "react-dom";
 import Image from "next/image";
 
+// The queue waits on this: a scroll under the view-transition snapshot is never seen.
+let trackFade: Promise<unknown> = Promise.resolve();
+
 /** Feeds the styled range its filled (and buffered) proportion; see .range in globals.css. */
 const filled = (value: number, max: number, buffered = 0) =>
   ({
@@ -163,7 +166,7 @@ export default function Player({
     root.dataset.vt = dir;
     const t = document.startViewTransition(() => flushSync(() => setIndex(i)));
     t.ready.catch(() => {});
-    t.finished.finally(() => delete root.dataset.vt);
+    trackFade = t.finished.finally(() => delete root.dataset.vt);
   };
   useEffect(() => {
     if (!playing || !track) return;
@@ -1273,6 +1276,55 @@ function FullView({
   } | null>(null);
   const dim = Math.min(backdropDim(lum) + (showLyrics ? 0.2 : 0), 0.85);
 
+  // Scrolls only the list; scrollIntoView would also nudge the fixed overlay.
+  const list = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const ol = list.current;
+    let live = true;
+    let raf = 0;
+    // Any hand on the list takes over from the glide.
+    const stop = () => {
+      live = false;
+      cancelAnimationFrame(raf);
+    };
+    const hands = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    hands.forEach((e) => ol?.addEventListener(e, stop, { passive: true }));
+    trackFade.then(() => {
+      const li = ol?.querySelector<HTMLElement>("[aria-current=true]");
+      if (!live || !ol || !li) return;
+      const at =
+        li.getBoundingClientRect().top - ol.getBoundingClientRect().top;
+      // Still above the 75% line: leave it be, so rapid skips don't churn the list.
+      if (at >= 0 && at + li.offsetHeight / 2 <= ol.clientHeight * 0.75) return;
+      const from = ol.scrollTop;
+      const to = Math.max(
+        0,
+        Math.min(
+          ol.scrollHeight - ol.clientHeight,
+          from + at - ol.clientHeight * 0.25 + li.offsetHeight / 2,
+        ),
+      );
+      const dist = to - from;
+      if (Math.abs(dist) < 1) return;
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches)
+        return void (ol.scrollTop = to);
+      const dur = Math.min(900, 450 + Math.abs(dist) / 3);
+      let start = 0;
+      const tick = (now: number) => {
+        start ||= now;
+        const p = Math.min((now - start) / dur, 1);
+        const ease = p < 0.5 ? 4 * p ** 3 : 1 - (-2 * p + 2) ** 3 / 2;
+        ol.scrollTop = from + dist * ease;
+        if (p < 1 && live) raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    });
+    return () => {
+      stop();
+      hands.forEach((e) => ol?.removeEventListener(e, stop));
+    };
+  }, [index, path, showQueue]);
+
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-canvas text-white">
       {/* The Clear variant floats over media; artwork can be bright, so it gets a
@@ -1305,7 +1357,10 @@ function FullView({
           <h3 className="px-5 py-6 text-xs font-semibold uppercase text-white/60 tracking-widest">
             Playing next · {queue.length} song{queue.length === 1 ? "" : "s"}
           </h3>
-          <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6">
+          <ol
+            ref={list}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6"
+          >
             {path.map((i, pos) => {
               const t = queue[i];
               const current = i === index;
