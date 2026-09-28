@@ -38,10 +38,27 @@ import {
  */
 const CAN_IMPORT = process.env.NEXT_PUBLIC_ENV === "local";
 
-/** What the playlists tab is looking at: a saved playlist, or one from a link. */
-export type Detail = { name: string; tracks: Track[]; shared?: boolean };
+/** What the playlists tab is looking at: a saved playlist, one from a link, or Most Played. */
+export type Detail = {
+  name: string;
+  tracks: Track[];
+  shared?: boolean;
+  /** Kept by listening, so it can't be renamed or deleted. */
+  smart?: boolean;
+};
+
+/** This month's listening, for the head of the tab. */
+export type Month = {
+  label: string;
+  plays: number;
+  minutes: number;
+  artists: { name: string; n: number; art?: string }[];
+};
 
 const songs = (n: number) => `${n} song${n === 1 ? "" : "s"}`;
+const playsOf = (n: number) => `${n} play${n === 1 ? "" : "s"}`;
+const hoursOf = (m: number) =>
+  m < 60 ? `${m} min` : `${Math.floor(m / 60)} hr ${m % 60} min`;
 
 /** Four covers when there are four, otherwise the first one — the way a folder of
     albums reads at a glance without needing a title to identify it. */
@@ -320,6 +337,9 @@ export function PlaylistsView({
   queue,
   playing,
   onToggle,
+  smart,
+  month,
+  onArtist,
 }: {
   playlists: Playlists;
   shared: Detail | null;
@@ -335,6 +355,9 @@ export function PlaylistsView({
   queue: Track[];
   playing: boolean;
   onToggle: () => void;
+  smart: Detail | null;
+  month: Month | null;
+  onArtist: (name: string) => void;
 }) {
   // Shuffle reorders the queue, so it is matched as a set, not a sequence.
   const queued = new Set(queue.map((t) => t.id));
@@ -357,6 +380,53 @@ export function PlaylistsView({
 
   return (
     <div className="mb-6">
+      {month && (
+        <section className="mb-8">
+          <div className="mb-3 flex items-baseline justify-between gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-label-3">
+              {month.label} so far
+            </h2>
+            <span className="text-xs tabular-nums text-label-2">
+              {playsOf(month.plays)} · {hoursOf(month.minutes)}
+            </span>
+          </div>
+          <div className="flex gap-4 overflow-x-auto pb-1">
+            {month.artists.map((a, i) => (
+              <button
+                key={a.name}
+                onClick={() => onArtist(a.name)}
+                title={`${a.name}: ${playsOf(a.n)} this month`}
+                className="w-20 shrink-0 text-center transition hover:opacity-80"
+              >
+                <span className="relative block">
+                  {a.art ? (
+                    <img
+                      src={a.art}
+                      alt=""
+                      loading="lazy"
+                      className="h-20 w-20 rounded-full object-cover shadow-sm shadow-black/40"
+                    />
+                  ) : (
+                    <span className="grid h-20 w-20 place-items-center rounded-full bg-fill text-label-3">
+                      <TbMusic size={22} />
+                    </span>
+                  )}
+                  <span className="absolute -left-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-canvas px-1 text-[10px] font-semibold tabular-nums ring-1 ring-separator">
+                    {i + 1}
+                  </span>
+                </span>
+                <span className="mt-1.5 block truncate text-xs font-medium">
+                  {a.name}
+                </span>
+                <span className="block text-[11px] tabular-nums text-label-2">
+                  {playsOf(a.n)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       <div className="mb-4 flex items-center justify-between gap-2">
         <h2 className="shrink-0 text-xl font-semibold tracking-tight">
           Playlists
@@ -373,7 +443,7 @@ export function PlaylistsView({
         </div>
       </div>
 
-      {!names.length && !shared && (
+      {!names.length && !shared && !smart && (
         <div className="flex flex-col items-center gap-2.5 py-16 text-center">
           <TbPlaylist className="text-label-3" size={32} />
           <p className="max-w-xs text-sm text-label-2">
@@ -384,6 +454,17 @@ export function PlaylistsView({
       )}
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 lg:grid-cols-4">
+        {smart && (
+          <Card
+            name={smart.name}
+            tracks={smart.tracks}
+            onOpen={() => open(smart)}
+            onPlay={() => onPlay(smart.tracks, false, `“${smart.name}”`)}
+            current={isQueue(smart.tracks)}
+            playing={playing}
+            onToggle={onToggle}
+          />
+        )}
         {shared && (
           <Card
             name={shared.name}
@@ -591,7 +672,7 @@ function PlaylistDetail({
   onSaveShared: () => void;
   onPlay: (tracks: Track[], shuffle: boolean, what: string) => void;
 }) {
-  const { name, tracks, shared } = detail;
+  const { name, tracks, shared, smart } = detail;
   const [renaming, setRenaming] = useState<string | null>(null);
   const empty = !tracks.length;
 
@@ -669,6 +750,7 @@ function PlaylistDetail({
 
           <p className="mt-1 text-xs text-label-2">
             {shared && <span className="text-accent">Shared playlist · </span>}
+            {smart && <span className="text-accent">Updated as you listen · </span>}
             {songs(tracks.length)}
             {fmtTotal(tracks) && ` · ${fmtTotal(tracks)}`}
           </p>
@@ -700,7 +782,7 @@ function PlaylistDetail({
               Share
             </button>
 
-            {shared ? (
+            {smart ? null : shared ? (
               <button
                 onClick={onSaveShared}
                 className="flex h-9 items-center gap-1.5 rounded-control bg-fill px-4 text-xs font-medium text-label transition hover:bg-fill-2 active:scale-[0.97]"
