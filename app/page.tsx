@@ -2,17 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Logo } from "@/components/Logo";
+import { useRouter } from "next/navigation";
+import { ClearButton, RecentStrip, Row, SkeletonRows } from "@/components/Row";
+import { Masthead, TabBar, Tab, isTab } from "@/components/AppNav";
 import {
   TbArrowsShuffle,
   TbChevronDown,
-  TbExternalLink,
   TbFolderPlus,
-  TbLibrary,
   TbMusic,
   TbPlayerPlayFilled,
-  TbPlaylist,
-  TbPlus,
   TbKeyboard,
   TbSearch,
   TbShare3,
@@ -32,7 +30,6 @@ import {
   Playlists,
   search,
   importFiles,
-  isPreview,
   decodePlaylist,
   encodeBackup,
   decodeBackup,
@@ -43,18 +40,17 @@ import {
   getPlays,
   recordPlay,
   mostPlayed,
-  topArtists,
-  monthStart,
+  monthStats,
   Plays,
   getSession,
   current,
   pushRecent,
   savePlaylists,
-  fmtTime,
   shuffled,
   artistsOf,
 } from "@/lib/music";
 import { findLyrics, lyricDoc, LyricDoc } from "@/lib/find";
+import { isYouTube, saveYtSession } from "@/lib/youtube";
 
 /**
  * Importing writes into *this browser's* IndexedDB, which is worth doing on the
@@ -66,18 +62,6 @@ import { findLyrics, lyricDoc, LyricDoc } from "@/lib/find";
  * import code is dropped from the deployed bundle rather than hidden inside it.
  */
 const CAN_IMPORT = process.env.NEXT_PUBLIC_ENV === "local";
-
-type Tab = "search" | "library" | "playlists";
-
-const TABS = [
-  { id: "search", label: "Search", Icon: TbSearch },
-  { id: "library", label: "Library", Icon: TbLibrary },
-  { id: "playlists", label: "Playlists", Icon: TbPlaylist },
-] as const satisfies readonly {
-  id: Tab;
-  label: string;
-  Icon: typeof TbSearch;
-}[];
 
 type SortKey = "artist" | "title" | "album" | "longest" | "shortest";
 
@@ -132,10 +116,10 @@ export default function Home() {
   const [recent, setRecent] = useState<Track[]>([]);
   const [plays, setPlays] = useState<Plays>({});
 
-  const [scrolled, setScrolled] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
   const [dragging, setDragging] = useState(false);
   const searchBox = useRef<HTMLInputElement>(null);
+  const router = useRouter();
 
   useEffect(() => {
     getLibrary().then(async (lib) => {
@@ -162,6 +146,10 @@ export default function Home() {
             id: "shared-link",
             description: "It may have been cut short on its way here.",
           });
+        if (isYouTube(song)) {
+          saveYtSession({ queue: [song], index: 0 });
+          return router.push("/youtube");
+        }
         setQueue([song]);
         setQIndex(0);
         return toast.info(`“${song.title}” was shared with you`, {
@@ -214,7 +202,7 @@ export default function Home() {
         }),
       { once: true },
     );
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
@@ -260,14 +248,6 @@ export default function Home() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // The scroll edge effect: no separator at rest, a hairline once content slides
-  // under the bar (HIG — Layout > Visual hierarchy).
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 4);
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   // Every song's lyrics, read the first time a search could use them. The
@@ -321,11 +301,20 @@ export default function Home() {
     };
   }, [query]);
 
+  /** YouTube songs play in YouTube's player, so a list splits by where its pick plays. */
   const play = (tracks: Track[], i: number) => {
-    setQueue(tracks);
-    setQIndex(i);
+    const yt = isYouTube(tracks[i]);
+    const list = tracks.filter((t) => isYouTube(t) === yt);
+    const at = list.indexOf(tracks[i]);
+    if (yt) {
+      setPlaying(false);
+      saveYtSession({ queue: list, index: at, play: true });
+      return router.push("/youtube");
+    }
+    setQueue(list);
+    setQIndex(at);
     setPlaying(true);
-    setRecent(pushRecent(tracks[i]));
+    setRecent(pushRecent(list[at]));
   };
 
   /**
@@ -351,7 +340,7 @@ export default function Home() {
   /** Insert into the live queue — right after the current track, or at the end. */
   const enqueue = (track: Track, mode: "next" | "end") => {
     // An empty queue just starts playing, which is its own feedback.
-    if (!queue.length) return play([track], 0);
+    if (!queue.length || isYouTube(track)) return play([track], 0);
     const q = [...queue];
     q.splice(mode === "next" ? qIndex + 1 : q.length, 0, track);
     setQueue(q);
@@ -374,11 +363,14 @@ export default function Home() {
     const p = new URLSearchParams(location.search);
     const cap = (k: string) => p.get(k)?.slice(0, 80) || "";
     const [a, f, q] = [cap("artist"), cap("folder"), cap("q")];
-    if (!a && !f && !q) return;
     /* eslint-disable react-hooks/set-state-in-effect -- the URL is an external
        source that can only be read after hydration. A lazy state initialiser
        would read it during the first render and not match the prerendered
        HTML, which is what a static export ships. */
+    // ?tab= is how another page links to a tab.
+    const t = p.get("tab");
+    if (isTab(t)) setTab(t);
+    if (!a && !f && !q) return;
     setArtist(a);
     setFolder(f || null);
     setFilter(q);
@@ -632,18 +624,7 @@ export default function Home() {
       }
     : null;
 
-  const since = monthStart();
-  const month = mostPlayed(plays, since, Infinity);
-  const monthStats = month.length
-    ? {
-        label: new Date().toLocaleString(undefined, { month: "long" }),
-        plays: month.reduce((n, x) => n + x.n, 0),
-        minutes: Math.round(
-          month.reduce((m, x) => m + x.n * (x.track.duration ?? 0), 0) / 60,
-        ),
-        artists: topArtists(plays, since),
-      }
-    : null;
+  const month = monthStats(plays);
 
   // Derived, not stored, so the open playlist tracks its own edits.
   const detail: Detail | null =
@@ -820,6 +801,7 @@ export default function Home() {
       : tab === "library"
         ? inLibrary
         : (detail?.tracks ?? []);
+  const mixed = shown.some(isYouTube) && !shown.every(isYouTube);
 
   /** Nothing to list, so the message stands in for the list and takes its room.
       The playlists grid carries its own empty state, hence the detail check. */
@@ -828,67 +810,25 @@ export default function Home() {
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas pb-40 text-label sm:pb-28">
-      <header
-        className={`glass sticky top-0 z-30 border-b transition-colors ${
-          scrolled ? "border-separator" : "border-transparent"
-        }`}
-      >
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
-          {/* Home, the way a logo goes home. The brand page is the colophon's job. */}
-          <h1 className="flex shrink-0 items-center text-base font-semibold tracking-tight">
-            <Link
-              href="/"
-              aria-label="Music — home"
-              className="flex items-center gap-1.5 transition-colors hover:text-accent"
-            >
-              <Logo className="text-accent" size={20} />
-              <span className="hidden sm:inline">Music</span>
-            </Link>
-          </h1>
-
-          <div className="relative min-w-0 flex-1">
-            <TbSearch
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-label-3"
-              size={14}
-            />
-            <input
-              ref={searchBox}
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setTab("search");
-              }}
-              placeholder="Songs, artists, albums, lyrics…"
-              className="h-9 w-full rounded-control bg-fill pl-9 pr-9 text-sm outline-none transition placeholder:text-label-3 focus:bg-fill-2"
-            />
-            {!!query && (
-              <ClearButton label="Clear search" onClick={() => setQuery("")} />
-            )}
-          </div>
-
-          {/* A segmented control on desktop; below sm the tab bar at the foot of the
-              screen carries primary navigation instead (HIG — Layout). */}
-          <nav className="hidden shrink-0 items-center gap-1 rounded-control bg-fill p-1 sm:flex">
-            {TABS.map(({ id, label }) => (
-              <button
-                key={id}
-                onClick={() => setTab(id)}
-                aria-current={tab === id ? "page" : undefined}
-                className={`rounded-[7px] px-2.5 py-1 text-xs font-medium transition ${
-                  tab === id
-                    ? "bg-elevated-2 text-label shadow-sm"
-                    : "text-label-2 hover:text-label"
-                }`}
-              >
-                {label}
-                {id === "library" && library.length
-                  ? ` (${library.length})`
-                  : ""}
-              </button>
-            ))}
-          </nav>
-        </div>
-      </header>
+      <Masthead current={tab} onTab={setTab} libraryCount={library.length}>
+        <TbSearch
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-label-3"
+          size={14}
+        />
+        <input
+          ref={searchBox}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setTab("search");
+          }}
+          placeholder="Songs, artists, albums, lyrics…"
+          className="h-9 w-full rounded-control bg-fill pl-9 pr-9 text-sm outline-none transition placeholder:text-label-3 focus:bg-fill-2"
+        />
+        {!!query && (
+          <ClearButton label="Clear search" onClick={() => setQuery("")} />
+        )}
+      </Masthead>
 
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-5">
         {/* The big dropzone is the empty library's call to action. Once songs
@@ -899,40 +839,7 @@ export default function Home() {
         )}
 
         {tab === "library" && !!recent.length && (
-          <section className="mb-5">
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-label-3">
-              Recently played
-            </h2>
-            <div className="flex gap-3 overflow-x-auto pb-1">
-              {recent.map((t, i) => (
-                <button
-                  key={t.id}
-                  onClick={() => play(recent, i)}
-                  title={`${t.title} — ${t.artist}`}
-                  className="w-24 shrink-0 text-left transition hover:opacity-80"
-                >
-                  {t.artwork ? (
-                    <img
-                      src={t.artwork}
-                      alt=""
-                      loading="lazy"
-                      className="h-24 w-24 rounded-[10px] object-cover shadow-sm shadow-black/40"
-                    />
-                  ) : (
-                    <div className="grid h-24 w-24 place-items-center rounded-[10px] bg-fill text-label-3">
-                      <TbMusic size={24} />
-                    </div>
-                  )}
-                  <div className="mt-1.5 truncate text-xs font-medium">
-                    {t.title}
-                  </div>
-                  <div className="truncate text-[11px] text-label-2">
-                    {t.artist}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
+          <RecentStrip tracks={recent} onPlay={(i) => play(recent, i)} />
         )}
 
         {tab === "library" && !!library.length && (
@@ -1156,7 +1063,7 @@ export default function Home() {
             playing={playing}
             onToggle={() => setPlaying(!playing)}
             smart={smart}
-            month={monthStats}
+            month={month}
             onArtist={(name) => goTo("artist", name)}
           />
         )}
@@ -1215,10 +1122,10 @@ export default function Home() {
               note={
                 tab === "search" && snippets.has(track.id) ? (
                   <i>“{snippets.get(track.id)}”</i>
-                ) : detail?.smart && counts.has(track.id) ? (
-                  `${counts.get(track.id)} play${counts.get(track.id) === 1 ? "" : "s"}`
                 ) : undefined
               }
+              plays={detail?.smart ? counts.get(track.id) : undefined}
+              mark={mixed}
               onAddTo={() => setAddTo(track)}
               onRemove={
                 // Bundled tracks ship with the site; removeTrack can't evict one, it would just reappear.
@@ -1315,27 +1222,7 @@ export default function Home() {
         onPlayed={(t) => setPlays(recordPlay(t))}
       />
 
-      {/* Primary navigation lives at the foot of the screen on a phone, where a thumb
-          reaches it, and the mini player stacks directly above it (HIG — Layout). */}
-      <nav className="glass fixed inset-x-0 bottom-0 z-40 border-t border-separator sm:hidden">
-        <div className="flex">
-          {TABS.map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              aria-current={tab === id ? "page" : undefined}
-              className={`flex h-14 flex-1 flex-col items-center justify-center gap-1 transition ${
-                tab === id ? "text-accent" : "text-label-2"
-              }`}
-            >
-              <Icon size={19} />
-              <span className="text-xxs font-medium tracking-tight">
-                {label}
-              </span>
-            </button>
-          ))}
-        </div>
-      </nav>
+      <TabBar current={tab} onTab={setTab} />
     </div>
   );
 }
@@ -1430,161 +1317,6 @@ function ShortcutSheet({ onClose }: { onClose: () => void }) {
 }
 
 /** What a result row will look like, while the search is still out. */
-function SkeletonRows() {
-  return (
-    <ul aria-hidden className="animate-pulse">
-      {Array.from({ length: 8 }, (_, i) => (
-        <li key={i} className="flex items-center gap-3 px-1 py-2">
-          <div className="h-11 w-11 shrink-0 rounded-[7px] bg-fill" />
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="h-3 w-1/3 rounded bg-fill" />
-            <div className="h-2.5 w-1/2 rounded bg-fill opacity-70" />
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** The trailing clear affordance a search field grows once it has a value. */
-function ClearButton({
-  label,
-  onClick,
-}: {
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className="absolute right-2 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full bg-fill-2 text-label-2 transition hover:text-label"
-    >
-      <TbX size={11} />
-    </button>
-  );
-}
-
-function Row({
-  track,
-  active,
-  playing,
-  onPlay,
-  onAddTo,
-  onRemove,
-  note,
-}: {
-  track: Track;
-  active: boolean;
-  playing: boolean;
-  onPlay: () => void;
-  onAddTo: () => void;
-  onRemove?: () => void;
-  /** A third line: the lyric a search matched, or a play count. */
-  note?: React.ReactNode;
-}) {
-  return (
-    <li className="group relative flex items-center gap-3 rounded-control px-1 py-1 transition hover:bg-fill">
-      {/* The separator is inset past the artwork, the way a system list draws it. */}
-      <span className="pointer-events-none absolute bottom-0 left-16 right-2 h-px bg-separator group-last:hidden" />
-
-      <button
-        onClick={onPlay}
-        aria-label={playing ? "Pause" : "Play"}
-        className="relative shrink-0"
-      >
-        {track.artwork ? (
-          <img
-            src={track.artwork}
-            alt=""
-            loading="lazy"
-            className="h-11 w-11 rounded-[7px] object-cover shadow-sm shadow-black/40"
-          />
-        ) : (
-          <div className="grid h-11 w-11 place-items-center rounded-[7px] bg-fill text-label-3">
-            <TbMusic size={18} />
-          </div>
-        )}
-        <span
-          className={`absolute inset-0 grid place-items-center rounded-[7px] bg-black/55 text-white transition ${
-            active ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-          }`}
-        >
-          {playing ? (
-            <span className="morph-out">
-              <Logo size={16} className="spin-mark" />
-            </span>
-          ) : (
-            <TbPlayerPlayFilled size={15} />
-          )}
-        </span>
-      </button>
-
-      <button
-        onClick={onPlay}
-        title={`${track.title} — ${track.artist}`}
-        className="min-w-0 flex-1 py-1 text-left space-y-0.5"
-      >
-        <div
-          className={`truncate text-sm ${active ? "font-semibold text-accent" : "font-medium text-label"}`}
-        >
-          {track.title}
-        </div>
-        <div className="truncate text-[11px] text-label-2">
-          {track.artist}
-          {track.album ? ` — ${track.album}` : ""}
-        </div>
-        {note && (
-          <div className="truncate text-[11px] text-label-3">{note}</div>
-        )}
-      </button>
-
-      <span className="hidden text-xs tabular-nums text-label-3 sm:block">
-        {fmtTime(track.duration)}
-      </span>
-
-      {isPreview(track) && (
-        <span className="hidden rounded-full bg-fill px-2 py-0.5 text-xxs font-medium text-label-2 md:block">
-          Preview
-        </span>
-      )}
-
-      <button
-        onClick={onAddTo}
-        aria-label={`Add ${track.title} to a playlist or the queue`}
-        title="Add to playlist or queue"
-        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-label-3 transition hover:bg-fill-2 hover:text-label"
-      >
-        <TbPlus size={16} />
-      </button>
-
-      {track.appleUrl && (
-        <a
-          href={track.appleUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Open in Apple Music (full track)"
-          className="hidden h-9 w-9 shrink-0 place-items-center rounded-full text-label-3 transition hover:bg-fill-2 hover:text-accent sm:grid"
-        >
-          <TbExternalLink size={15} />
-        </a>
-      )}
-
-      {onRemove && (
-        <button
-          onClick={onRemove}
-          title="Remove"
-          aria-label="Remove"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-label-3 transition hover:bg-fill-2 hover:text-accent"
-        >
-          <TbX size={15} />
-        </button>
-      )}
-    </li>
-  );
-}
-
 /** Import compacted into the toolbar — the dropzone card only greets an empty library. */
 function ImportButtons({
   onFiles,

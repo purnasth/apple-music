@@ -19,6 +19,11 @@ no backend to run.
   key) for 30-second previews. Every result links out to Apple Music for full
   playback. You can also search the library by a line of its lyrics: Nepali and
   Hindi lines typed in Latin letters still match, however they're spelled.
+- **YouTube** (`/youtube`). Full songs in YouTube's own player, played as
+  whoever is signed into YouTube in the browser. Picking a song starts a station
+  from YouTube's Mix, and the queue keeps refilling the same way when it runs
+  out. YouTube songs go into playlists, Recently Played and Most Played like any
+  other. Search needs a free `NEXT_PUBLIC_YT_KEY` (see `.env.example`).
 - **Player.**
   - Play/pause, prev/next, seek, volume, shuffle and repeat one.
   - Crossfade between songs, and gapless starts.

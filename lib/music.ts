@@ -1,4 +1,5 @@
 import { createStore, set, get, del, values, type UseStore } from 'idb-keyval';
+import type { Source } from './youtube';
 
 export type Track = {
   id: string;
@@ -156,7 +157,8 @@ const localTrack = (r: MetaRecord): Track => ({
 });
 
 /** 30s clips come from the catalogue; bundled and imported files are whole tracks. */
-export const isPreview = (t: Track) => !t.local && !t.id.startsWith('file:');
+export const isPreview = (t: Track) =>
+  !t.local && !t.id.startsWith('file:') && !t.id.startsWith('yt:');
 
 /** The library shipped with the site (public/songs.json), audio hosted on R2. */
 async function bundled(): Promise<Track[]> {
@@ -321,19 +323,47 @@ export function mostPlayed(plays: Plays, since = 0, limit = 25) {
     .slice(0, limit);
 }
 
+/** This month's listening, for the head of a page. */
+export type Month = {
+  label: string;
+  plays: number;
+  minutes: number;
+  artists: { name: string; n: number; art?: string; sources: Source[] }[];
+};
+
+/** Plays, minutes and top artists since the month began; null before the first play. */
+export function monthStats(plays: Plays, now = new Date()): Month | null {
+  const since = monthStart(now);
+  const month = mostPlayed(plays, since, Infinity);
+  if (!month.length) return null;
+  return {
+    label: now.toLocaleString(undefined, { month: 'long' }),
+    plays: month.reduce((n, x) => n + x.n, 0),
+    minutes: Math.round(month.reduce((m, x) => m + x.n * (x.track.duration ?? 0), 0) / 60),
+    artists: topArtists(plays, since),
+  };
+}
+
 /**
  * Artists by plays since a moment. A collaboration counts for each credited
  * artist; the cover is that of their most played song, the spelling the one
  * credited most often.
  */
 export function topArtists(plays: Plays, since = 0, limit = 8) {
-  type Acc = { n: number; spellings: Map<string, number>; art?: string; best: number };
+  type Acc = {
+    n: number;
+    spellings: Map<string, number>;
+    art?: string;
+    best: number;
+    sources: Set<Source>;
+  };
   const by = new Map<string, Acc>();
   for (const { track, n } of mostPlayed(plays, since, Infinity))
     for (const name of artistsOf(track.artist)) {
       const key = name.toLowerCase();
-      const a: Acc = by.get(key) ?? { n: 0, spellings: new Map(), best: 0 };
+      const a: Acc = by.get(key) ?? { n: 0, spellings: new Map(), best: 0, sources: new Set() };
       a.n += n;
+      a.sources.add(track.id.startsWith('yt:') ? 'youtube' : 'library');
       a.spellings.set(name, (a.spellings.get(name) ?? 0) + n);
       if (n > a.best) {
         a.best = n;
@@ -346,6 +376,7 @@ export function topArtists(plays: Plays, since = 0, limit = 8) {
       name: [...a.spellings].sort((x, y) => y[1] - x[1])[0][0],
       n: a.n,
       art: a.art,
+      sources: [...a.sources],
     }))
     .sort((a, b) => b.n - a.n)
     .slice(0, limit);

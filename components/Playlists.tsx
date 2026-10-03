@@ -4,9 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   TbArrowLeft,
   TbArrowsShuffle,
+  TbBan,
   TbBookmarkPlus,
+  TbBrandYoutubeFilled,
   TbCheck,
   TbDownload,
+  TbLibrary,
   TbMusic,
   TbPencil,
   TbPlayerPlayFilled,
@@ -22,12 +25,20 @@ import {
 import { Logo } from "@/components/Logo";
 import { toast } from "@/lib/toast";
 import {
+  Month,
   Track,
   Playlists,
   encodePlaylist,
   fmtTotal,
   shareable,
 } from "@/lib/music";
+import { Source, sourceOf, sourcesOf } from "@/lib/youtube";
+import { YouTubeMark } from "@/components/Row";
+
+const SOURCE = {
+  youtube: { label: "YouTube", icon: <TbBrandYoutubeFilled size={12} className="text-[#ff0033]" /> },
+  library: { label: "Library", icon: <TbLibrary size={12} /> },
+} satisfies Record<Source, { label: string; icon: React.ReactNode }>;
 
 /**
  * Backing up reads and Restore writes this browser's own playlists, the same
@@ -45,14 +56,6 @@ export type Detail = {
   shared?: boolean;
   /** Kept by listening, so it can't be renamed or deleted. */
   smart?: boolean;
-};
-
-/** This month's listening, for the head of the tab. */
-export type Month = {
-  label: string;
-  plays: number;
-  minutes: number;
-  artists: { name: string; n: number; art?: string }[];
 };
 
 const songs = (n: number) => `${n} song${n === 1 ? "" : "s"}`;
@@ -202,9 +205,12 @@ export function AddToSheet({
         <Section label="Playlists">
           {names.map((n) => {
             const list = playlists[n];
+            // One player per playlist: a library song can't join a YouTube one, or back.
+            const other = list.length && !list.some((t) => sourceOf(t) === sourceOf(track));
             return (
               <SheetRow
                 key={n}
+                disabled={!!other}
                 // Closing on the tap is what makes the toast visible at all: a
                 // modal dialog sits in the top layer, above any toast. The check
                 // shows what a playlist already holds before you decide.
@@ -214,7 +220,11 @@ export function AddToSheet({
                 }}
                 icon={<Mosaic tracks={list} className="h-9 w-9 rounded-[6px]" />}
                 title={n}
-                subtitle={songs(list.length)}
+                subtitle={
+                  other
+                    ? `${SOURCE[sourceOf(list[0])].label} songs only`
+                    : songs(list.length)
+                }
                 checked={list.some((t) => t.id === track.id)}
               />
             );
@@ -282,19 +292,22 @@ function SheetRow({
   title,
   subtitle,
   checked,
+  disabled,
   onClick,
 }: {
   icon: React.ReactNode;
   title: string;
   subtitle?: string;
   checked?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       aria-pressed={checked}
-      className="flex w-full items-center gap-3 px-4 py-2 text-left transition hover:bg-fill"
+      className="flex w-full items-center gap-3 px-4 py-2 text-left transition hover:bg-fill disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
     >
       <span className="grid h-9 w-9 shrink-0 place-items-center text-label-2">
         {icon}
@@ -307,7 +320,9 @@ function SheetRow({
           </span>
         )}
       </span>
-      {checked !== undefined && (
+      {disabled ? (
+        <TbBan size={16} aria-hidden className="shrink-0 text-label-3" />
+      ) : checked !== undefined && (
         <span
           className={`grid h-5 w-5 shrink-0 place-items-center rounded-full transition ${
             checked ? "bg-accent text-white" : "border border-separator"
@@ -321,6 +336,70 @@ function SheetRow({
 }
 
 /* ---------- The tab itself ---------- */
+
+/** This month's plays, listening time and top artists, as the head of a page. */
+export function MonthSection({
+  month,
+  onArtist,
+}: {
+  month: Month;
+  onArtist: (name: string) => void;
+}) {
+  const mixed =
+    month.artists.some((a) => a.sources.includes("youtube")) &&
+    month.artists.some((a) => a.sources.includes("library"));
+  return (
+    <section className="mb-8">
+      <div className="mb-3 flex items-baseline justify-between gap-2">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-label-3">
+          {month.label} so far
+        </h2>
+        <span className="text-xs tabular-nums text-label-2">
+          {playsOf(month.plays)} · {hoursOf(month.minutes)}
+        </span>
+      </div>
+      <div className="flex gap-4 overflow-x-auto pb-1">
+        {month.artists.map((a, i) => (
+          <button
+            key={a.name}
+            onClick={() => onArtist(a.name)}
+            title={`${a.name}: ${playsOf(a.n)} this month${
+              mixed ? ` · ${a.sources.map((s) => SOURCE[s].label).join(" and ")}` : ""
+            }`}
+            className="w-20 shrink-0 text-center transition hover:opacity-80"
+          >
+            <span className="relative block">
+              {a.art ? (
+                <img
+                  src={a.art}
+                  alt=""
+                  loading="lazy"
+                  className="h-20 w-20 rounded-full object-cover shadow-sm shadow-black/40"
+                />
+              ) : (
+                <span className="grid h-20 w-20 place-items-center rounded-full bg-fill text-label-3">
+                  <TbMusic size={22} />
+                </span>
+              )}
+              <span className="absolute -left-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-canvas px-1 text-[10px] font-semibold tabular-nums ring-1 ring-separator">
+                {i + 1}
+              </span>
+              {mixed && a.sources.includes("youtube") && (
+                <YouTubeMark className="bottom-0 right-0 size-5 ring-1 ring-separator" size={13} />
+              )}
+            </span>
+            <span className="mt-1.5 block truncate text-xs font-medium">
+              {a.name}
+            </span>
+            <span className="block text-[11px] tabular-nums text-label-2">
+              {playsOf(a.n)}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 export function PlaylistsView({
   playlists,
@@ -380,52 +459,7 @@ export function PlaylistsView({
 
   return (
     <div className="mb-6">
-      {month && (
-        <section className="mb-8">
-          <div className="mb-3 flex items-baseline justify-between gap-2">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-label-3">
-              {month.label} so far
-            </h2>
-            <span className="text-xs tabular-nums text-label-2">
-              {playsOf(month.plays)} · {hoursOf(month.minutes)}
-            </span>
-          </div>
-          <div className="flex gap-4 overflow-x-auto pb-1">
-            {month.artists.map((a, i) => (
-              <button
-                key={a.name}
-                onClick={() => onArtist(a.name)}
-                title={`${a.name}: ${playsOf(a.n)} this month`}
-                className="w-20 shrink-0 text-center transition hover:opacity-80"
-              >
-                <span className="relative block">
-                  {a.art ? (
-                    <img
-                      src={a.art}
-                      alt=""
-                      loading="lazy"
-                      className="h-20 w-20 rounded-full object-cover shadow-sm shadow-black/40"
-                    />
-                  ) : (
-                    <span className="grid h-20 w-20 place-items-center rounded-full bg-fill text-label-3">
-                      <TbMusic size={22} />
-                    </span>
-                  )}
-                  <span className="absolute -left-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-canvas px-1 text-[10px] font-semibold tabular-nums ring-1 ring-separator">
-                    {i + 1}
-                  </span>
-                </span>
-                <span className="mt-1.5 block truncate text-xs font-medium">
-                  {a.name}
-                </span>
-                <span className="block text-[11px] tabular-nums text-label-2">
-                  {playsOf(a.n)}
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
+      {month && <MonthSection month={month} onArtist={onArtist} />}
 
       <div className="mb-4 flex items-center justify-between gap-2">
         <h2 className="shrink-0 text-xl font-semibold tracking-tight">
@@ -526,6 +560,15 @@ function Card({
         {badge && (
           <span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/65 px-2 py-0.5 text-xxs font-medium text-white backdrop-blur-sm">
             {badge}
+          </span>
+        )}
+        {!!tracks.length && (
+          <span className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/65 px-1.5 py-1 text-white backdrop-blur-sm">
+            {sourcesOf(tracks).map((s) => (
+              <span key={s} title={SOURCE[s].label} aria-label={SOURCE[s].label} className="flex">
+                {SOURCE[s].icon}
+              </span>
+            ))}
           </span>
         )}
         {!!tracks.length && (
