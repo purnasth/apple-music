@@ -185,7 +185,6 @@ export default function Player({
     [order, queue],
   );
   const here = path.indexOf(index);
-  const artLum = useArtTone(track?.artwork).lum;
   const lyricsless = !!track && noLyrics === track.id;
   const lyricsChecking = !!track && lyricsChecked !== track.id;
   const lyricsOn = showLyrics && !lyricsless;
@@ -974,167 +973,242 @@ export default function Player({
         />
       )}
 
-      <div
-        className={`fixed inset-x-0 bottom-14 z-40 px-4 pb-3 sm:bottom-0 sm:pb-4 ${
-          full ? "hidden" : ""
-        }`}
+      <PlayerBar
+        hidden={full}
+        track={track}
+        error={error}
+        playing={playing}
+        onToggle={() => setPlaying(!playing)}
+        onOpen={() => openFull(true)}
+        time={time}
+        dur={seekMax}
+        buffered={buffered}
+        onSeek={seek}
+        prev={prev}
+        next={next}
+        shuffle={shuffle}
+        toggleShuffle={toggleShuffle}
+        repeat={repeat}
+        toggleRepeat={toggleRepeat}
+        volume={volume}
+        setVolume={setVolume}
+        muted={muted}
+        setMuted={setMuted}
       >
-        {/* A floating capsule rather than an edge-to-edge slab: the functional
-            layer sits above the content, it is not welded to the screen.
-            70rem = the main column's max-w-6xl minus its px-4, so the capsule's
-            edges line up with the content above it. */}
-        {/* Clipped per layer, not on the capsule, so the volume popover can rise above it. */}
-        <div className="glass relative mx-auto max-w-[70rem] rounded-sheet shadow-2xl shadow-black/50 ring-1 ring-white/10">
-          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-sheet">
-            {/* Glass has no colour of its own — it takes it from what is behind.
-                Nothing is behind a bar at the screen edge, so the artwork stands in
-                and the capsule reads in the album's colour (HIG — Liquid Glass). */}
-            {track.artwork && (
+        {castable && (
+          <Btn
+            onClick={castTo}
+            active={castState === "connected"}
+            busy={castState === "connecting" && "Connecting…"}
+            label={CAST_LABEL()}
+          >
+            <TbCast />
+          </Btn>
+        )}
+        {mini.supported && (
+          <Btn
+            onClick={mini.toggle}
+            active={mini.isOpen}
+            label="Mini player (I)"
+          >
+            <TbPictureInPicture />
+          </Btn>
+        )}
+      </PlayerBar>
+    </>
+  );
+}
+
+/** The floating capsule at the foot of the page; `children` are its trailing extras. */
+export function PlayerBar({
+  hidden,
+  track,
+  error,
+  playing,
+  onToggle,
+  onOpen,
+  time,
+  dur,
+  buffered,
+  onSeek,
+  prev,
+  next,
+  shuffle,
+  toggleShuffle,
+  repeat,
+  toggleRepeat,
+  volume,
+  setVolume,
+  muted,
+  setMuted,
+  children,
+}: {
+  hidden?: boolean;
+  track: Track;
+  error?: string | null;
+  playing: boolean;
+  onToggle: () => void;
+  onOpen: () => void;
+  time: number;
+  dur: number;
+  buffered: number;
+  onSeek: (t: number) => void;
+  prev: () => void;
+  next: () => void;
+  shuffle: boolean;
+  toggleShuffle: () => void;
+  repeat: Repeat;
+  toggleRepeat: () => void;
+  volume: number;
+  setVolume: (v: number) => void;
+  muted: boolean;
+  setMuted: (m: boolean) => void;
+  children?: React.ReactNode;
+}) {
+  const artLum = useArtTone(track.artwork).lum;
+  return (
+    <div
+      className={`fixed inset-x-0 bottom-14 z-40 px-4 pb-3 sm:bottom-0 sm:pb-4 ${
+        hidden ? "hidden" : ""
+      }`}
+    >
+      {/* A floating capsule rather than an edge-to-edge slab: the functional
+          layer sits above the content, it is not welded to the screen.
+          70rem = the main column's max-w-6xl minus its px-4, so the capsule's
+          edges line up with the content above it. */}
+      {/* Clipped per layer, not on the capsule, so the volume popover can rise above it. */}
+      <div className="glass relative mx-auto max-w-[70rem] rounded-sheet shadow-2xl shadow-black/50 ring-1 ring-white/10">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-sheet">
+          {/* Glass has no colour of its own — it takes it from what is behind.
+              Nothing is behind a bar at the screen edge, so the artwork stands in
+              and the capsule reads in the album's colour (HIG — Liquid Glass). */}
+          {track.artwork && (
+            <img
+              src={track.artwork}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 h-full w-full scale-150 object-cover opacity-35 blur-2xl saturate-150"
+            />
+          )}
+          {/* The rim light that gives the material its thickness. */}
+          <span className="absolute inset-x-0 top-0 h-px bg-white/20" />
+        </div>
+
+        <div className="relative flex items-center gap-3 p-2 sm:gap-4 sm:p-3">
+          <button
+            onClick={onOpen}
+            aria-label="Play fullscreen"
+            title="Play fullscreen"
+            className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-[10px] shadow-lg shadow-black/40 ring-1 ring-white/10 sm:h-14 sm:w-14"
+          >
+            {track.artwork ? (
               <img
                 src={track.artwork}
                 alt=""
-                aria-hidden
-                className="absolute inset-0 h-full w-full scale-150 object-cover opacity-35 blur-2xl saturate-150"
+                className="h-full w-full object-cover"
               />
+            ) : (
+              <div className="grid h-full w-full place-items-center bg-fill text-label-3">
+                <TbMusic size={22} />
+              </div>
             )}
-            {/* The rim light that gives the material its thickness. */}
-            <span className="absolute inset-x-0 top-0 h-px bg-white/20" />
-          </div>
+            <span className="absolute inset-0 grid place-items-center bg-black/55 text-white opacity-0 transition group-hover:opacity-100">
+              <TbArrowsMaximize size={20} />
+            </span>
+          </button>
 
-          <div className="relative flex items-center gap-3 p-2 sm:gap-4 sm:p-3">
+          <div className="min-w-0 flex-1">
             <button
-              onClick={() => openFull(true)}
-              aria-label="Play fullscreen"
-              title="Play fullscreen"
-              className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-[10px] shadow-lg shadow-black/40 ring-1 ring-white/10 sm:h-14 sm:w-14"
+              onClick={onOpen}
+              title={`${track.title} — ${track.artist}`}
+              aria-label="Open the full player"
+              className="block w-full min-w-0 text-left"
             >
-              {track.artwork ? (
-                <img
-                  src={track.artwork}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="grid h-full w-full place-items-center bg-fill text-label-3">
-                  <TbMusic size={22} />
-                </div>
-              )}
-              <span className="absolute inset-0 grid place-items-center bg-black/55 text-white opacity-0 transition group-hover:opacity-100">
-                <TbArrowsMaximize size={20} />
+              <span className="block truncate text-xs font-medium sm:text-sm">
+                {track.title}
+              </span>
+              <span className="block truncate text-xxs text-label-2 sm:text-xs">
+                {track.artist}
+                {isPreview(track) ? " · 30s preview" : ""}
               </span>
             </button>
+            {error && (
+              <div className="truncate text-xs text-accent">{error}</div>
+            )}
 
-            <div className="min-w-0 flex-1">
-              <button
-                onClick={() => openFull(true)}
-                title={`${track.title} — ${track.artist}`}
-                aria-label="Open the full player"
-                className="block w-full min-w-0 text-left"
-              >
-                <span className="block truncate text-xs font-medium sm:text-sm">
-                  {track.title}
-                </span>
-                <span className="block truncate text-xxs text-label-2 sm:text-xs">
-                  {track.artist}
-                  {isPreview(track) ? " · 30s preview" : ""}
-                </span>
-              </button>
-              {error && (
-                <div className="truncate text-xs text-accent">{error}</div>
-              )}
-
-              <div className="mt-1.5 flex items-center gap-2">
-                <span className="text-[8px] sm:text-xxs tabular-nums text-label-3">
-                  {fmtTime(time)}
-                </span>
-                <Seek
-                  time={time}
-                  dur={seekMax}
-                  buffered={buffered}
-                  onSeek={seek}
-                  className="flex-1"
-                />
-                <span className="text-[8px] sm:text-xxs tabular-nums text-label-3">
-                  {fmtTime(seekMax)}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center">
-              <div className="flex items-center gap-1">
-                <span className="hidden sm:block">
-                  <Btn onClick={toggleShuffle} active={shuffle} label="Shuffle">
-                    <TbArrowsShuffle />
-                  </Btn>
-                </span>
-                <Btn onClick={prev} label="Previous">
-                  <TbPlayerTrackPrevFilled />
-                </Btn>
-                <button
-                  onClick={() => setPlaying(!playing)}
-                  aria-label={playing ? "Pause" : "Play"}
-                  title={playing ? "Pause" : "Play"}
-                  className="group grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
-                >
-                  {playing ? (
-                    <span className="morph-out">
-                      <Logo
-                        size={20}
-                        live
-                        art={track.artwork}
-                        tone={markTone(artLum)}
-                        className="live-mark"
-                      />
-                    </span>
-                  ) : (
-                    <TbPlayerPlayFilled size={18} />
-                  )}
-                </button>
-                <Btn onClick={next} label="Next">
-                  <TbPlayerTrackNextFilled />
-                </Btn>
-                <span className="hidden sm:block">
-                  <RepeatBtn repeat={repeat} onClick={toggleRepeat} />
-                </span>
-              </div>
-              <span
-                aria-hidden
-                className="mx-2 hidden h-5 w-px bg-separator sm:block"
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className="text-[8px] sm:text-xxs tabular-nums text-label-3">
+                {fmtTime(time)}
+              </span>
+              <Seek
+                time={time}
+                dur={dur}
+                buffered={buffered}
+                onSeek={onSeek}
+                className="flex-1"
               />
-              <div className="hidden items-center gap-1 sm:flex">
-                <Volume
-                  volume={volume}
-                  setVolume={setVolume}
-                  muted={muted}
-                  setMuted={setMuted}
-                  iconSize={14}
-                  overContent
-                />
-                {castable && (
-                  <Btn
-                    onClick={castTo}
-                    active={castState === "connected"}
-                    busy={castState === "connecting" && "Connecting…"}
-                    label={CAST_LABEL()}
-                  >
-                    <TbCast />
-                  </Btn>
+              <span className="text-[8px] sm:text-xxs tabular-nums text-label-3">
+                {fmtTime(dur)}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center">
+            <div className="flex items-center gap-1">
+              <span className="hidden sm:block">
+                <Btn onClick={toggleShuffle} active={shuffle} label="Shuffle">
+                  <TbArrowsShuffle />
+                </Btn>
+              </span>
+              <Btn onClick={prev} label="Previous">
+                <TbPlayerTrackPrevFilled />
+              </Btn>
+              <button
+                onClick={onToggle}
+                aria-label={playing ? "Pause" : "Play"}
+                title={playing ? "Pause" : "Play"}
+                className="group grid h-10 w-10 place-items-center rounded-full bg-label text-canvas transition hover:scale-105 active:scale-95"
+              >
+                {playing ? (
+                  <span className="morph-out">
+                    <Logo
+                      size={20}
+                      live
+                      art={track.artwork}
+                      tone={markTone(artLum)}
+                      className="live-mark"
+                    />
+                  </span>
+                ) : (
+                  <TbPlayerPlayFilled size={18} />
                 )}
-                {mini.supported && (
-                  <Btn
-                    onClick={mini.toggle}
-                    active={mini.isOpen}
-                    label="Mini player (I)"
-                  >
-                    <TbPictureInPicture />
-                  </Btn>
-                )}
-              </div>
+              </button>
+              <Btn onClick={next} label="Next">
+                <TbPlayerTrackNextFilled />
+              </Btn>
+              <span className="hidden sm:block">
+                <RepeatBtn repeat={repeat} onClick={toggleRepeat} />
+              </span>
+            </div>
+            <span
+              aria-hidden
+              className="mx-2 hidden h-5 w-px bg-separator sm:block"
+            />
+            <div className="hidden items-center gap-1 sm:flex">
+              <Volume
+                volume={volume}
+                setVolume={setVolume}
+                muted={muted}
+                setMuted={setMuted}
+                iconSize={14}
+                overContent
+              />
+              {children}
             </div>
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

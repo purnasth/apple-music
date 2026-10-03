@@ -22,6 +22,7 @@ import {
 import { Logo } from "@/components/Logo";
 import { toast } from "@/lib/toast";
 import {
+  Month,
   Track,
   Playlists,
   encodePlaylist,
@@ -45,14 +46,6 @@ export type Detail = {
   shared?: boolean;
   /** Kept by listening, so it can't be renamed or deleted. */
   smart?: boolean;
-};
-
-/** This month's listening, for the head of the tab. */
-export type Month = {
-  label: string;
-  plays: number;
-  minutes: number;
-  artists: { name: string; n: number; art?: string }[];
 };
 
 const songs = (n: number) => `${n} song${n === 1 ? "" : "s"}`;
@@ -322,6 +315,62 @@ function SheetRow({
 
 /* ---------- The tab itself ---------- */
 
+/** This month's plays, listening time and top artists, as the head of a page. */
+export function MonthSection({
+  month,
+  onArtist,
+}: {
+  month: Month;
+  onArtist: (name: string) => void;
+}) {
+  return (
+    <section className="mb-8">
+      <div className="mb-3 flex items-baseline justify-between gap-2">
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-label-3">
+          {month.label} so far
+        </h2>
+        <span className="text-xs tabular-nums text-label-2">
+          {playsOf(month.plays)} · {hoursOf(month.minutes)}
+        </span>
+      </div>
+      <div className="flex gap-4 overflow-x-auto pb-1">
+        {month.artists.map((a, i) => (
+          <button
+            key={a.name}
+            onClick={() => onArtist(a.name)}
+            title={`${a.name}: ${playsOf(a.n)} this month`}
+            className="w-20 shrink-0 text-center transition hover:opacity-80"
+          >
+            <span className="relative block">
+              {a.art ? (
+                <img
+                  src={a.art}
+                  alt=""
+                  loading="lazy"
+                  className="h-20 w-20 rounded-full object-cover shadow-sm shadow-black/40"
+                />
+              ) : (
+                <span className="grid h-20 w-20 place-items-center rounded-full bg-fill text-label-3">
+                  <TbMusic size={22} />
+                </span>
+              )}
+              <span className="absolute -left-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-canvas px-1 text-[10px] font-semibold tabular-nums ring-1 ring-separator">
+                {i + 1}
+              </span>
+            </span>
+            <span className="mt-1.5 block truncate text-xs font-medium">
+              {a.name}
+            </span>
+            <span className="block text-[11px] tabular-nums text-label-2">
+              {playsOf(a.n)}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function PlaylistsView({
   playlists,
   shared,
@@ -380,52 +429,7 @@ export function PlaylistsView({
 
   return (
     <div className="mb-6">
-      {month && (
-        <section className="mb-8">
-          <div className="mb-3 flex items-baseline justify-between gap-2">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-label-3">
-              {month.label} so far
-            </h2>
-            <span className="text-xs tabular-nums text-label-2">
-              {playsOf(month.plays)} · {hoursOf(month.minutes)}
-            </span>
-          </div>
-          <div className="flex gap-4 overflow-x-auto pb-1">
-            {month.artists.map((a, i) => (
-              <button
-                key={a.name}
-                onClick={() => onArtist(a.name)}
-                title={`${a.name}: ${playsOf(a.n)} this month`}
-                className="w-20 shrink-0 text-center transition hover:opacity-80"
-              >
-                <span className="relative block">
-                  {a.art ? (
-                    <img
-                      src={a.art}
-                      alt=""
-                      loading="lazy"
-                      className="h-20 w-20 rounded-full object-cover shadow-sm shadow-black/40"
-                    />
-                  ) : (
-                    <span className="grid h-20 w-20 place-items-center rounded-full bg-fill text-label-3">
-                      <TbMusic size={22} />
-                    </span>
-                  )}
-                  <span className="absolute -left-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-canvas px-1 text-[10px] font-semibold tabular-nums ring-1 ring-separator">
-                    {i + 1}
-                  </span>
-                </span>
-                <span className="mt-1.5 block truncate text-xs font-medium">
-                  {a.name}
-                </span>
-                <span className="block text-[11px] tabular-nums text-label-2">
-                  {playsOf(a.n)}
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
+      {month && <MonthSection month={month} onArtist={onArtist} />}
 
       <div className="mb-4 flex items-center justify-between gap-2">
         <h2 className="shrink-0 text-xl font-semibold tracking-tight">

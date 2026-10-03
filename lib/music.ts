@@ -156,7 +156,8 @@ const localTrack = (r: MetaRecord): Track => ({
 });
 
 /** 30s clips come from the catalogue; bundled and imported files are whole tracks. */
-export const isPreview = (t: Track) => !t.local && !t.id.startsWith('file:');
+export const isPreview = (t: Track) =>
+  !t.local && !t.id.startsWith('file:') && !t.id.startsWith('yt:');
 
 /** The library shipped with the site (public/songs.json), audio hosted on R2. */
 async function bundled(): Promise<Track[]> {
@@ -319,6 +320,27 @@ export function mostPlayed(plays: Plays, since = 0, limit = 25) {
     .filter((x) => x.n)
     .sort((a, b) => b.n - a.n || b.last - a.last)
     .slice(0, limit);
+}
+
+/** This month's listening, for the head of a page. */
+export type Month = {
+  label: string;
+  plays: number;
+  minutes: number;
+  artists: { name: string; n: number; art?: string }[];
+};
+
+/** Plays, minutes and top artists since the month began; null before the first play. */
+export function monthStats(plays: Plays, now = new Date()): Month | null {
+  const since = monthStart(now);
+  const month = mostPlayed(plays, since, Infinity);
+  if (!month.length) return null;
+  return {
+    label: now.toLocaleString(undefined, { month: 'long' }),
+    plays: month.reduce((n, x) => n + x.n, 0),
+    minutes: Math.round(month.reduce((m, x) => m + x.n * (x.track.duration ?? 0), 0) / 60),
+    artists: topArtists(plays, since),
+  };
 }
 
 /**
