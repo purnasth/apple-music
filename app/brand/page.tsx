@@ -9,6 +9,7 @@ export const metadata: Metadata = {
     "The identity behind Music by Purna: one word, one moon, one colour.",
   // Deliberately unlisted: reachable by URL, never by search or the app's own chrome.
   robots: { index: false, follow: false },
+  alternates: { canonical: "/brand" },
 };
 
 /* ------------------------------------------------------------------ */

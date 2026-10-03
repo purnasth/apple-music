@@ -1,78 +1,95 @@
-# Music
+# Music by Purna
 
-A static, serverless music search-and-player web app. Search the Apple Music
-catalogue, preview tracks, import your own audio files, and build playlists —
-with no database, no accounts, and no backend to run.
+**▶ Listen now: [music.purnashrestha.com.np](https://music.purnashrestha.com.np)**
+
+A free, static music player for a hand-picked library of Nepali, Hindi and
+English songs, with lyrics timed to the word. Search the wider catalogue for
+previews, build playlists and share them as links. No account, no database and
+no backend to run.
+
+[Open the app](https://music.purnashrestha.com.np) ·
+[Purna Shrestha](https://purnashrestha.com.np) ·
+[Deploying](DEPLOY.md)
 
 ## What it does
 
-- **Search** the Apple Music catalogue via the public iTunes Search API.
-  Debounced, cancels stale requests, and pulls 600px artwork. No API key.
-- **Play** through a persistent player bar: play/pause, prev/next, seek,
-  volume, shuffle, repeat, plus OS media keys and lockscreen controls via the
-  native MediaSession API.
-- **Import** your own audio files by drag-and-drop. Tags (title, artist, album,
-  duration, embedded cover art) are parsed in the browser; the audio is stored
-  as blobs in IndexedDB, so it plays full-length, persists across reloads, and
-  works offline.
-- **Playlists** stored in `localStorage`, freely mixing catalogue tracks and
-  your own files.
-- **Lyrics** in the full-screen view (button, or `Y`): time-synced lines from
-  [LRCLIB](https://lrclib.net), falling back to the plain lyrics embedded in
-  your own files. Bundled songs can be timed to the word offline (`pnpm
-  words`, run by the deploy; see DEPLOY.md), including ones with only plain lyrics; the rest fill line by line. Lyrics only
-  published in Urdu script are shown in Devanagari. The current line fills as it is sung, tapping any line seeks
-  there, and scrolling away offers a way back. Timing runs on one animation-frame
-  clock reading the audio directly, so React re-renders only when the line
-  changes. Opening and closing is a native view transition, not a layout
-  animation.
-
-## A note on catalogue playback
-
-The iTunes Search API returns **30-second previews**, so catalogue tracks play
-as previews only. Every result links out to Apple Music (`↗`) for full
-playback. For full-length audio inside this app, either import files you own
-into the Library tab, or wire up
-[MusicKit JS](https://developer.apple.com/documentation/musickitjs) to stream
-full tracks for listeners with an Apple Music subscription.
+- **Library.** Hundreds of full-length songs ship with the site, grouped into
+  folders. Filter by folder or artist, sort it, and link to a filtered view.
+- **Search.** Searches the streaming catalogue through Deezer's public API (no
+  key) for 30-second previews. Every result links out to Apple Music for full
+  playback. You can also search the library by a line of its lyrics: Nepali and
+  Hindi lines typed in Latin letters still match, however they're spelled.
+- **Player.**
+  - Play/pause, prev/next, seek, volume, shuffle and repeat one.
+  - Crossfade between songs, and gapless starts.
+  - A queue that shows the real play order.
+  - OS media keys and lock-screen controls through MediaSession.
+- **Full player.** The cover becomes a drifting backdrop under a waveform
+  horizon that moves with the music.
+- **Lyrics** (button, or `Y`).
+  - Time-synced lines come from [LRCLIB](https://lrclib.net). Bundled songs are
+    timed to the word offline with whisper.cpp (`pnpm words`).
+  - The current line fills as it's sung, and tapping a line seeks there.
+  - Lyrics published only in Urdu script are shown in Devanagari.
+- **Mini player.** A floating window that stays on top: Document
+  Picture-in-Picture in Chromium, and a painted video in Safari.
+- **Speakers and TVs.** AirPlay in Safari and Cast in Chrome, through the Remote
+  Playback API.
+- **Playlists.** Stored in `localStorage`. They mix catalogue and library songs,
+  and can be shared as a link. Smart lists show Most Played and this month's top
+  artists.
+- **Offline.** It installs as an app (PWA). A service worker caches the app and
+  every song you've played, and answers seeks locally.
+- **Keyboard.** The full set of shortcuts is listed under the keyboard button,
+  and they work inside the mini player too.
 
 ## Stack
 
 Next.js (App Router, static export) · React · Tailwind CSS · TypeScript ·
-`idb-keyval` for IndexedDB · `music-metadata` for tag parsing.
+Framer Motion · `idb-keyval` for IndexedDB · `music-metadata` for tag parsing.
 
-There is no server component to any of this — `next.config.ts` sets
-`output: "export"`, so the build is plain static assets.
+`next.config.ts` sets `output: "export"`, so the build is plain static assets.
+It's hosted on Cloudflare Workers static assets.
 
 ## Running locally
 
 ```bash
+cp .env.example .env.local  # NEXT_PUBLIC_ENV=local turns on importing your own files
 pnpm install
-pnpm dev         # http://localhost:3000
-pnpm test        # unit tests, plus smoke tests against the live search API
-pnpm build       # static export into ./out
-pnpm run deploy  # publish; see DEPLOY.md (not `pnpm deploy`, a pnpm built-in)
+pnpm dev                    # http://localhost:3000
+pnpm test                   # unit tests
+pnpm build                  # static export into ./out
+pnpm run deploy             # publish; see DEPLOY.md (not `pnpm deploy`, a pnpm built-in)
 ```
 
-## Deploying
+Importing audio by drag-and-drop is only switched on locally. Imported files are
+stored in that browser's IndexedDB, so they belong on the machine that has the
+files.
 
-The build output is a static directory, so it hosts anywhere. For Cloudflare
-Pages:
+## SEO
 
-- **Build command:** `pnpm build`
-- **Output directory:** `out`
-
-Or directly: `pnpm dlx wrangler pages deploy out`
+`app/robots.ts` and `app/sitemap.ts` build `/robots.txt` and `/sitemap.xml`.
+`app/layout.tsx` holds the title, description, canonical URL, Open Graph tags
+and `WebApplication` structured data. The site is verified in Google Search
+Console as the `purnashrestha.com.np` domain property.
 
 ## Layout
 
 ```
-app/page.tsx          search, library and playlist UI
-components/Player.tsx player bar, playback and MediaSession wiring
-lib/music.ts          search, IndexedDB library, playlist persistence
-components/Lyrics.tsx lyrics panel: frame clock, sweep, follow and hold
-lib/lyrics.ts         LRC parsing, line and word lookup, sweep pacing, LRCLIB lookup
-lib/align.ts          word timing by forced alignment, build time only
-scripts/align-lyrics.mjs  runs whisper.cpp over the library for lib/align.ts
-lib/music.test.ts     smoke tests
+app/page.tsx                search, library and playlist UI
+app/layout.tsx              metadata, structured data
+app/robots.ts, sitemap.ts   /robots.txt and /sitemap.xml
+components/Player.tsx       player bar, playback, crossfade, Cast/AirPlay, MediaSession
+components/Lyrics.tsx       lyrics panel: frame clock, sweep, follow and hold
+components/Horizon.tsx      waveform horizon in the full player
+components/MiniPlayer.tsx   floating mini player
+components/Playlists.tsx    playlists, smart lists, sharing
+lib/music.ts                search, library, playlists, play counts
+lib/lyrics.ts               LRC parsing, word lookup, LRCLIB lookup
+lib/find.ts                 lyric search across scripts and spellings
+lib/align.ts                word timing by forced alignment, build time only
+lib/shortcuts.ts            the keyboard map
+public/sw.js                service worker: offline app, song cache, Range requests
+scripts/build-songs.mjs     indexes public/songs into songs.json
+scripts/align-lyrics.mjs    runs whisper.cpp over the library for lib/align.ts
 ```
