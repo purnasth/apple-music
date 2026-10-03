@@ -7,6 +7,11 @@ export const hasKey = !!KEY;
 export const isYouTube = (t: Track) => t.id.startsWith("yt:");
 export const videoId = (t: Track) => t.id.slice(3);
 
+/** Which player a list belongs to; a playlist takes the kind of its first song. */
+export type Source = "youtube" | "library";
+export const sourceOf = (t: Track): Source => (isYouTube(t) ? "youtube" : "library");
+export const sourcesOf = (tracks: Track[]) => [...new Set(tracks.map(sourceOf))];
+
 /** "PT1H2M3S" → 3723. */
 export const isoSecs = (iso: string) => {
   const m = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(iso);

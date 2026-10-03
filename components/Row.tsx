@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  TbBrandYoutubeFilled,
   TbExternalLink,
   TbHeadphones,
   TbMusic,
@@ -11,6 +12,24 @@ import {
 import { Logo } from "@/components/Logo";
 import { Track, fmtTime, isPreview } from "@/lib/music";
 import { isYouTube } from "@/lib/youtube";
+
+/** Tags a YouTube song (or artist) in a list that mixes both kinds. */
+export function YouTubeMark({
+  className = "-bottom-1 -right-1 size-4",
+  size = 11,
+}: {
+  className?: string;
+  size?: number;
+}) {
+  return (
+    <span
+      title="YouTube"
+      className={`pointer-events-none absolute grid place-items-center rounded-full bg-canvas text-[#ff0033] ${className}`}
+    >
+      <TbBrandYoutubeFilled size={size} aria-label="YouTube" />
+    </span>
+  );
+}
 
 export function SkeletonRows() {
   return (
@@ -58,6 +77,7 @@ export function Row({
   onRemove,
   note,
   plays,
+  mark,
 }: {
   track: Track;
   active: boolean;
@@ -68,6 +88,8 @@ export function Row({
   /** A third line: the lyric a search matched. */
   note?: React.ReactNode;
   plays?: number;
+  /** Tag YouTube songs: set when the list mixes them with the library. */
+  mark?: boolean;
 }) {
   return (
     <li className="group relative flex items-center gap-3 rounded-control px-1 py-1 transition hover:bg-fill">
@@ -104,6 +126,7 @@ export function Row({
             <TbPlayerPlayFilled size={15} />
           )}
         </span>
+        {mark && isYouTube(track) && <YouTubeMark />}
       </button>
 
       <button
@@ -198,6 +221,7 @@ export function RecentStrip({
   tracks: Track[];
   onPlay: (i: number) => void;
 }) {
+  const mixed = tracks.some(isYouTube) && !tracks.every(isYouTube);
   return (
     <section className="mb-5">
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-label-3">
@@ -211,18 +235,21 @@ export function RecentStrip({
             title={`${t.title} — ${t.artist}`}
             className="w-24 shrink-0 text-left transition hover:opacity-80"
           >
-            {t.artwork ? (
-              <img
-                src={t.artwork}
-                alt=""
-                loading="lazy"
-                className="h-24 w-24 rounded-[10px] object-cover shadow-sm shadow-black/40"
-              />
-            ) : (
-              <div className="grid h-24 w-24 place-items-center rounded-[10px] bg-fill text-label-3">
-                <TbMusic size={24} />
-              </div>
-            )}
+            <span className="relative block">
+              {t.artwork ? (
+                <img
+                  src={t.artwork}
+                  alt=""
+                  loading="lazy"
+                  className="h-24 w-24 rounded-[10px] object-cover shadow-sm shadow-black/40"
+                />
+              ) : (
+                <div className="grid h-24 w-24 place-items-center rounded-[10px] bg-fill text-label-3">
+                  <TbMusic size={24} />
+                </div>
+              )}
+              {mixed && isYouTube(t) && <YouTubeMark />}
+            </span>
             <div className="mt-1.5 truncate text-xs font-medium">
               {t.title}
             </div>

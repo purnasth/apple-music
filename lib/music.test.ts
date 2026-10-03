@@ -209,12 +209,15 @@ test('mostPlayed and topArtists rank by plays in range, splitting collaborations
     ['a', 'b'],
   );
   assert.deepEqual(topArtists(plays, 100), [
-    { name: 'Swar', n: 5, art: '/a.jpg' },
-    { name: 'John Rai', n: 2, art: '/b.jpg' },
+    { name: 'Swar', n: 5, art: '/a.jpg', sources: ['library'] },
+    { name: 'John Rai', n: 2, art: '/b.jpg', sources: ['library'] },
   ]);
   // Case-only spellings merge, and the more-played spelling wins.
   assert.deepEqual(
     topArtists(plays).find((a) => a.name.toLowerCase() === 'john rai'),
-    { name: 'John Rai', n: 3, art: '/b.jpg' },
+    { name: 'John Rai', n: 3, art: '/b.jpg', sources: ['library'] },
   );
+  // An artist heard on YouTube and from the library carries both.
+  plays['yt:x'] = { t: t('yt:x', 'Swar'), at: [400] };
+  assert.deepEqual(topArtists(plays, 100)[0].sources, ['library', 'youtube']);
 });

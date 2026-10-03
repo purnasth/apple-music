@@ -614,11 +614,7 @@ export default function Home() {
 
   // Most Played is kept by listening, not by hand; tracks refresh from the
   // library so an imported song's artwork is this session's.
-  // YouTube songs play in their own player, so their listening stays on /youtube.
-  const libPlays = Object.fromEntries(
-    Object.entries(plays).filter(([id]) => !id.startsWith("yt:")),
-  );
-  const top = mostPlayed(libPlays);
+  const top = mostPlayed(plays);
   const counts = new Map(top.map((x) => [x.track.id, x.n]));
   const smart: Detail | null = top.length
     ? {
@@ -628,7 +624,7 @@ export default function Home() {
       }
     : null;
 
-  const month = monthStats(libPlays);
+  const month = monthStats(plays);
 
   // Derived, not stored, so the open playlist tracks its own edits.
   const detail: Detail | null =
@@ -805,6 +801,7 @@ export default function Home() {
       : tab === "library"
         ? inLibrary
         : (detail?.tracks ?? []);
+  const mixed = shown.some(isYouTube) && !shown.every(isYouTube);
 
   /** Nothing to list, so the message stands in for the list and takes its room.
       The playlists grid carries its own empty state, hence the detail check. */
@@ -1128,6 +1125,7 @@ export default function Home() {
                 ) : undefined
               }
               plays={detail?.smart ? counts.get(track.id) : undefined}
+              mark={mixed}
               onAddTo={() => setAddTo(track)}
               onRemove={
                 // Bundled tracks ship with the site; removeTrack can't evict one, it would just reappear.

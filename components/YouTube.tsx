@@ -74,6 +74,9 @@ const PLAYING = 1;
 const PAUSED = 2;
 const CUED = 5;
 
+/** Up next keeps at least this many songs ahead of the one playing. */
+const AHEAD = 20;
+
 let api: Promise<YTGlobal> | undefined;
 
 /** YouTube's IFrame Player API, loaded once. */
@@ -107,6 +110,8 @@ export default function YouTube() {
   const [shuffle, setShuffle] = useState(false);
   const [repeatOne, setRepeatOne] = useState(false);
   const [radioLoading, setRadioLoading] = useState(false);
+  const [scoutReady, setScoutReady] = useState(false);
+  const [atEnd, setAtEnd] = useState(false);
 
   const [addTo, setAddTo] = useState<Track | null>(null);
   const [playlists, setPlaylists] = useState<Playlists>({});
@@ -116,7 +121,13 @@ export default function YouTube() {
   const host = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLElement>(null);
   const player = useRef<YTPlayer | null>(null);
+  // A second, never-playing player reads Mixes, so the one playing is never interrupted.
+  const scoutHost = useRef<HTMLDivElement>(null);
+  const scout = useRef<Promise<YTPlayer> | null>(null);
   const cued = useRef<(() => void) | null>(null);
+  const extending = useRef(false);
+  const seeded = useRef(new Set<string>());
+  const more = useRef<HTMLDivElement>(null);
   const unshuffled = useRef<Track[] | null>(null);
   const lastTime = useRef(0);
   // YouTube's callbacks outlive renders, so they read the latest state from here.
@@ -136,15 +147,16 @@ export default function YouTube() {
   /** A list from Listening plays from the tapped song, and radio carries on after it. */
   function playList(tracks: Track[], i: number) {
     unshuffled.current = null;
+    seeded.current.clear();
     setShuffle(false);
     setQueue(tracks);
     setView("next");
     play(i, tracks);
   }
 
-  /** YouTube's own Mix for a song, read by cueing it: no API quota. */
+  /** YouTube's own Mix for a song, read by cueing it in the scout: no API quota. */
   async function mixOf(t: Track): Promise<string[]> {
-    const p = player.current!;
+    const p = await scout.current!;
     const ready = new Promise<void>((r) => {
       cued.current = r;
       setTimeout(r, 5000);
@@ -155,33 +167,46 @@ export default function YouTube() {
     return p.getPlaylist() ?? [];
   }
 
-  /** The songs YouTube would play after this one, appended to `base`. */
-  async function radio(t: Track, base: Track[]) {
+  /**
+   * Appends what YouTube would play after the queue's last song not yet used as a
+   * seed, and hands back the longer queue. Each call costs 1 unit of quota.
+   */
+  async function extend(): Promise<Track[]> {
+    const q = live.current.queue;
+    const seed = q.findLast((t) => !seeded.current.has(t.id));
+    if (extending.current || !seed || !scout.current) return q;
+    extending.current = true;
+    seeded.current.add(seed.id);
     setRadioLoading(true);
     try {
-      const have = new Set([...base, t].map((x) => x.id));
-      const ids = (await mixOf(t)).filter((id) => !have.has(`yt:${id}`));
-      return [...base, ...(await videos(ids))];
+      const ids = await mixOf(seed);
+      const have = new Set(live.current.queue.map((x) => x.id));
+      const fresh = await videos(
+        ids.filter((id) => !have.has(`yt:${id}`)).slice(0, 50),
+      );
+      const next = [...live.current.queue, ...fresh];
+      live.current.queue = next;
+      setQueue(next);
+      return next;
     } catch (e) {
       toast.error("Couldn't load similar songs", {
         description: (e as Error).message,
       });
-      return base;
+      return live.current.queue;
     } finally {
+      extending.current = false;
       setRadioLoading(false);
     }
   }
 
-  /** A search pick starts a station: the song, then its Mix. */
-  async function startRadio(t: Track) {
+  /** A search pick starts a station: the song now, its Mix right behind it. */
+  function startRadio(t: Track) {
     unshuffled.current = null;
+    seeded.current.clear();
     setShuffle(false);
-    setQueue([t]);
-    setIndex(0);
     setView("next");
-    const q = await radio(t, [t]);
-    setQueue(q);
-    play(0, q);
+    setQueue([t]);
+    play(0, [t]);
   }
 
   useEffect(() => {
@@ -195,11 +220,8 @@ export default function YouTube() {
         return player.current?.playVideo();
       }
       if (index + 1 < queue.length) return play(index + 1);
-      const more = await radio(queue[index], queue);
-      if (more.length > queue.length) {
-        setQueue(more);
-        play(index + 1, more);
-      }
+      const q = await extend();
+      if (q.length > index + 1) play(index + 1, q);
     };
     if (queue.length) saveYtSession({ queue, index });
   });
@@ -214,6 +236,23 @@ export default function YouTube() {
     let gone = false;
     loadApi().then((YT) => {
       if (gone) return;
+      scout.current = new Promise((resolve) => {
+        const p: YTPlayer = new YT.Player(
+          scoutHost.current!.appendChild(document.createElement("div")),
+          {
+            width: "1",
+            height: "1",
+            playerVars: {},
+            events: {
+              onReady: () => {
+                resolve(p);
+                setScoutReady(true);
+              },
+              onStateChange: ({ data }) => data === CUED && cued.current?.(),
+            },
+          },
+        );
+      });
       // The API swaps its element for an iframe, so it gets one React doesn't own.
       const el = host.current!.appendChild(document.createElement("div"));
       player.current = new YT.Player(el, {
@@ -232,7 +271,6 @@ export default function YouTube() {
             } else player.current!.cueVideoById(videoId(t));
           },
           onStateChange: ({ data }) => {
-            if (data === CUED) cued.current?.();
             if (data === PLAYING) setPlaying(true);
             if (data === PAUSED || data === ENDED) setPlaying(false);
             if (data === ENDED) live.current.onEnded();
@@ -244,8 +282,30 @@ export default function YouTube() {
       gone = true;
       player.current?.destroy();
       player.current = null;
+      scout.current?.then((p) => p.destroy());
+      scout.current = null;
     };
   }, []);
+
+  // Up next never runs dry: it keeps a run of songs ahead, and grows for as
+  // long as you scroll to its end.
+  useEffect(() => {
+    const short = queue.length - index - 1 < AHEAD;
+    if (scoutReady && !radioLoading && queue.length && (short || atEnd))
+      extend();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoutReady, queue, index, radioLoading, atEnd]);
+
+  const hasQueue = queue.length > 0;
+  useEffect(() => {
+    const el = more.current;
+    if (!el || view !== "next") return setAtEnd(false);
+    const io = new IntersectionObserver(([e]) => setAtEnd(e.isIntersecting), {
+      rootMargin: "400px",
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [view, hasQueue]);
 
   // The iframe has no time events, so the clock is polled.
   useEffect(() => {
@@ -573,10 +633,13 @@ export default function YouTube() {
               })}
             </ul>
           )}
-          {view === "next" && radioLoading && (
-            <p className="py-4 text-center text-xs text-label-2">
-              Finding similar songs…
-            </p>
+          {view === "next" && !!queue.length && (
+            <div
+              ref={more}
+              className="py-4 text-center text-xs text-label-2"
+            >
+              {radioLoading ? "Finding similar songs…" : ""}
+            </div>
           )}
         </section>
       </main>
@@ -614,6 +677,12 @@ export default function YouTube() {
           </a>
         </PlayerBar>
       )}
+
+      <div
+        ref={scoutHost}
+        aria-hidden
+        className="pointer-events-none fixed left-0 top-0 size-px overflow-hidden opacity-0"
+      />
 
       <TabBar current="youtube" />
 

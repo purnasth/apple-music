@@ -1,4 +1,5 @@
 import { createStore, set, get, del, values, type UseStore } from 'idb-keyval';
+import type { Source } from './youtube';
 
 export type Track = {
   id: string;
@@ -327,7 +328,7 @@ export type Month = {
   label: string;
   plays: number;
   minutes: number;
-  artists: { name: string; n: number; art?: string }[];
+  artists: { name: string; n: number; art?: string; sources: Source[] }[];
 };
 
 /** Plays, minutes and top artists since the month began; null before the first play. */
@@ -349,13 +350,20 @@ export function monthStats(plays: Plays, now = new Date()): Month | null {
  * credited most often.
  */
 export function topArtists(plays: Plays, since = 0, limit = 8) {
-  type Acc = { n: number; spellings: Map<string, number>; art?: string; best: number };
+  type Acc = {
+    n: number;
+    spellings: Map<string, number>;
+    art?: string;
+    best: number;
+    sources: Set<Source>;
+  };
   const by = new Map<string, Acc>();
   for (const { track, n } of mostPlayed(plays, since, Infinity))
     for (const name of artistsOf(track.artist)) {
       const key = name.toLowerCase();
-      const a: Acc = by.get(key) ?? { n: 0, spellings: new Map(), best: 0 };
+      const a: Acc = by.get(key) ?? { n: 0, spellings: new Map(), best: 0, sources: new Set() };
       a.n += n;
+      a.sources.add(track.id.startsWith('yt:') ? 'youtube' : 'library');
       a.spellings.set(name, (a.spellings.get(name) ?? 0) + n);
       if (n > a.best) {
         a.best = n;
@@ -368,6 +376,7 @@ export function topArtists(plays: Plays, since = 0, limit = 8) {
       name: [...a.spellings].sort((x, y) => y[1] - x[1])[0][0],
       n: a.n,
       art: a.art,
+      sources: [...a.sources],
     }))
     .sort((a, b) => b.n - a.n)
     .slice(0, limit);
