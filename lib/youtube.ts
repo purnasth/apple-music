@@ -35,6 +35,7 @@ const unescape = (s: string) =>
 
 type Snippet = {
   title: string;
+  channelId?: string;
   channelTitle: string;
   thumbnails: Record<string, { url: string } | undefined>;
 };
@@ -49,6 +50,7 @@ const toTrack = (id: string, s: Snippet, secs?: number, aspect?: number): Track 
   appleUrl: `https://www.youtube.com/watch?v=${id}`,
   duration: secs,
   aspect,
+  channel: s.channelId,
 });
 
 async function api<T>(path: string, params: Record<string, string>) {
@@ -98,12 +100,15 @@ export async function musicChart(): Promise<Track[]> {
   return videos(data.items.map((i) => i.id));
 }
 
-/** Music videos for a query: 100 units, a hundredth of the free daily quota. */
+/**
+ * Videos for a query, ranked as YouTube ranks them: 100 units, a hundredth of the
+ * free daily quota. Not limited to the Music category, which drops official
+ * uploads filed elsewhere (a studio's trailer) and keeps fan edits filed there.
+ */
 export async function searchYouTube(q: string): Promise<Track[]> {
   const data = await api<{ items: { id: { videoId: string } }[] }>("search", {
     part: "id",
     type: "video",
-    videoCategoryId: "10",
     maxResults: "25",
     q,
   });

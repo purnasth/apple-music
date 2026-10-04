@@ -76,7 +76,7 @@ type YTGlobal = {
 const ENDED = 0;
 const PLAYING = 1;
 const PAUSED = 2;
-const CUED = 5;
+const BUFFERING = 3;
 
 /**
  * How long the For you tile keeps the cover up after playback settles. YouTube's
@@ -125,7 +125,7 @@ export default function YouTube() {
   const [shuffle, setShuffle] = useState(false);
   const [repeatOne, setRepeatOne] = useState(false);
   const [radioLoading, setRadioLoading] = useState(false);
-  const [scoutReady, setScoutReady] = useState(false);
+  const [apiReady, setApiReady] = useState(false);
   const [atEnd, setAtEnd] = useState(false);
   // What For you opens on: your own favourites, or the chart before you have any.
   const [picks, setPicks] = useState<{ tracks: Track[]; mine: boolean } | null>(
@@ -141,12 +141,19 @@ export default function YouTube() {
   const [plays, setPlays] = useState<Plays>({});
 
   const host = useRef<HTMLDivElement>(null);
+  // Set once the player reports ready: before that its methods don't exist yet.
   const player = useRef<YTPlayer | null>(null);
+  // A pick made while the player was still loading, played the moment it's ready.
+  const pending = useRef<string | null>(null);
+  const state = useRef(-1);
   // A second, never-playing player reads Mixes, so the one playing is never interrupted.
   const scoutHost = useRef<HTMLDivElement>(null);
-  const scout = useRef<Promise<YTPlayer> | null>(null);
-  const cued = useRef<(() => void) | null>(null);
-  const scoutBusy = useRef<Promise<unknown>>(Promise.resolve());
+  // The search results a station was picked from: YouTube's own ranking, which
+  // carries on where YouTube makes no Mix (a trailer).
+  const rest = useRef<Track[]>([]);
+  const channels = useRef(new Set<string>());
+  // Bumped per station, so a lookup still running for the last one is dropped.
+  const station = useRef(0);
   const extending = useRef(false);
   const seeded = useRef(new Set<string>());
   const more = useRef<HTMLDivElement>(null);
@@ -162,41 +169,73 @@ export default function YouTube() {
 
   function play(i: number, q = queue) {
     const t = q[i];
-    if (!t || !player.current) return;
+    if (!t) return;
     setIndex(i);
     lastTime.current = 0;
-    player.current.loadVideoById(videoId(t));
+    if (player.current) player.current.loadVideoById(videoId(t));
+    else pending.current = videoId(t);
     setRecent(pushRecent(t));
+    // Browsers let sound start only shortly after a tap; a player that took
+    // longer to load is refused, and waits at 0:00 for another one.
+    const id = t.id;
+    setTimeout(() => {
+      if (state.current === PLAYING || state.current === BUFFERING) return;
+      if (live.current.queue[live.current.index]?.id !== id) return;
+      toast("Tap to play", {
+        id: "autoplay",
+        duration: 10000,
+        description: `${t.title} — ${t.artist}`,
+        action: { label: "Play", onClick: () => player.current?.playVideo() },
+      });
+    }, 4000);
   }
 
   /** A list from Listening plays from the tapped song, and radio carries on after it. */
   function playList(tracks: Track[], i: number) {
+    rest.current = [];
     unshuffled.current = null;
     seeded.current.clear();
+    channels.current.clear();
+    station.current++;
     setShuffle(false);
     setQueue(tracks);
     play(i, tracks);
   }
 
-  /** YouTube's own Mix for a song, read by cueing it in the scout: no API quota. */
-  function mixOf(t: Track): Promise<string[]> {
-    // One cue at a time: the scout has a single playlist and a single "cued".
-    const run = scoutBusy.current.then(() => readMix(t));
-    scoutBusy.current = run.catch(() => {});
-    return run;
+  /**
+   * A YouTube playlist's video ids, read by cueing it in a throwaway player: no API
+   * quota. A reused player hands lists back late and out of order, so each read
+   * gets a fresh one.
+   */
+  async function listOf(list: string): Promise<string[]> {
+    const YT = await loadApi();
+    const el = scoutHost.current?.appendChild(document.createElement("div"));
+    if (!el) return [];
+    return new Promise((resolve) => {
+      let tries = 0;
+      const p: YTPlayer = new YT.Player(el, {
+        width: "1",
+        height: "1",
+        playerVars: {},
+        events: {
+          onReady: () => {
+            p.cuePlaylist({ list, listType: "playlist" });
+            const poll = () => {
+              const ids = p.getPlaylist() ?? [];
+              if (!ids.length && ++tries < 20) return void setTimeout(poll, 200);
+              p.destroy();
+              resolve(ids);
+            };
+            poll();
+          },
+          onStateChange: () => {},
+        },
+      });
+    });
   }
 
-  async function readMix(t: Track): Promise<string[]> {
-    const p = await scout.current!;
-    const ready = new Promise<void>((r) => {
-      cued.current = r;
-      setTimeout(r, 5000);
-    });
-    p.cuePlaylist({ list: `RD${videoId(t)}`, listType: "playlist" });
-    await ready;
-    cued.current = null;
-    return p.getPlaylist() ?? [];
-  }
+  /** YouTube's Mix for a song; empty for a video YouTube makes none of (a trailer). */
+  const mixOf = (t: Track) => listOf(`RD${videoId(t)}`);
 
   /**
    * Appends what YouTube would play after the queue's last song not yet used as a
@@ -205,16 +244,34 @@ export default function YouTube() {
   async function extend(): Promise<Track[]> {
     const q = live.current.queue;
     const seed = q.findLast((t) => !seeded.current.has(t.id));
-    if (extending.current || !seed || !scout.current) return q;
+    if (extending.current || !seed) return q;
     extending.current = true;
     seeded.current.add(seed.id);
+    const mine = station.current;
     setRadioLoading(true);
     try {
+      // YouTube's own lists, in order: the song's Mix; for a video with none (a
+      // trailer), the search it was picked from, else its channel's uploads,
+      // which is what YouTube's embed suggests after such a video.
       const ids = await mixOf(seed);
       const have = new Set(live.current.queue.map((x) => x.id));
-      const fresh = await videos(
+      let fresh = await videos(
         ids.filter((id) => !have.has(`yt:${id}`)).slice(0, 50),
       );
+      if (!ids.length) {
+        fresh = rest.current.filter((x) => !have.has(x.id));
+        rest.current = [];
+        const channel =
+          seed.channel ?? (await videos([videoId(seed)]))[0]?.channel;
+        if (!fresh.length && channel && !channels.current.has(channel)) {
+          channels.current.add(channel);
+          const uploads = await listOf(`UU${channel.slice(2)}`);
+          fresh = await videos(
+            uploads.filter((id) => !have.has(`yt:${id}`)).slice(0, 50),
+          );
+        }
+      }
+      if (mine !== station.current) return live.current.queue;
       const next = [...live.current.queue, ...fresh];
       live.current.queue = next;
       setQueue(next);
@@ -247,10 +304,13 @@ export default function YouTube() {
     setPicks({ tracks: chart.slice(0, 12), mine: false });
   }
 
-  /** A search pick starts a station: the song now, its Mix right behind it. */
-  function startRadio(t: Track) {
+  /** A pick starts a station: the song now, its Mix right behind it, or the rest of its search results. */
+  function startRadio(t: Track, from: Track[] = []) {
+    rest.current = from.filter((x) => x.id !== t.id);
     unshuffled.current = null;
     seeded.current.clear();
+    channels.current.clear();
+    station.current++;
     setShuffle(false);
     setQueue([t]);
     play(0, [t]);
@@ -282,60 +342,46 @@ export default function YouTube() {
     const s = getYtSession();
     if (!s) setView("home");
     let gone = false;
+    let created: YTPlayer | undefined;
     loadApi().then((YT) => {
       if (gone) return;
-      scout.current = new Promise((resolve) => {
-        const p: YTPlayer = new YT.Player(
-          scoutHost.current!.appendChild(document.createElement("div")),
-          {
-            width: "1",
-            height: "1",
-            playerVars: {},
-            events: {
-              onReady: () => {
-                resolve(p);
-                setScoutReady(true);
-              },
-              onStateChange: ({ data }) => data === CUED && cued.current?.(),
-            },
-          },
-        );
-      });
+      setApiReady(true);
       // The API swaps its element for an iframe, so it gets one React doesn't own.
       const el = host.current!.appendChild(document.createElement("div"));
-      player.current = new YT.Player(el, {
+      const p: YTPlayer = (created = new YT.Player(el, {
         width: "100%",
         height: "100%",
         playerVars: { playsinline: 1, rel: 0 },
         events: {
           onReady: () => {
+            player.current = p;
+            if (pending.current) return p.loadVideoById(pending.current);
             if (!s) return;
             setQueue(s.queue);
             setIndex(s.index);
             const t = s.queue[s.index];
             if (s.play) {
               setRecent(pushRecent(t));
-              player.current!.loadVideoById(videoId(t));
-            } else player.current!.cueVideoById(videoId(t));
+              p.loadVideoById(videoId(t));
+            } else p.cueVideoById(videoId(t));
           },
           onStateChange: ({ data }) => {
             setVeiled(true);
             clearTimeout(unveil.current);
             if (data === PLAYING)
               unveil.current = window.setTimeout(() => setVeiled(false), VEIL_MS);
+            state.current = data;
             if (data === PLAYING) setPlaying(true);
             if (data === PAUSED || data === ENDED) setPlaying(false);
             if (data === ENDED) live.current.onEnded();
           },
         },
-      });
+      }));
     });
     return () => {
       gone = true;
-      player.current?.destroy();
+      created?.destroy();
       player.current = null;
-      scout.current?.then((p) => p.destroy());
-      scout.current = null;
     };
   }, []);
 
@@ -343,10 +389,10 @@ export default function YouTube() {
   // long as you scroll to its end.
   useEffect(() => {
     const short = queue.length - index - 1 < AHEAD;
-    if (scoutReady && !radioLoading && queue.length && (short || atEnd))
+    if (apiReady && !radioLoading && queue.length && (short || atEnd))
       extend();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scoutReady, queue, index, radioLoading, atEnd]);
+  }, [apiReady, queue, index, radioLoading, atEnd]);
 
   const hasQueue = queue.length > 0;
   useEffect(() => {
@@ -362,7 +408,7 @@ export default function YouTube() {
   // "More like" your top song, read once from its Mix.
   const seedPick = picks?.mine ? picks.tracks[0] : undefined;
   useEffect(() => {
-    if (!scoutReady || !seedPick || !hasKey) return;
+    if (!apiReady || !seedPick || !hasKey) return;
     let gone = false;
     mixOf(seedPick)
       .then((ids) =>
@@ -372,7 +418,7 @@ export default function YouTube() {
       .catch(() => {});
     return () => void (gone = true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scoutReady, seedPick]);
+  }, [apiReady, seedPick]);
 
   // Songs saved before tracks carried their aspect learn it when they play: 1 unit.
   const asked = useRef(new Set<string>());
@@ -614,7 +660,10 @@ export default function YouTube() {
           className={`${track ? "" : "hidden"} ${
             view === "home"
               ? "pointer-events-none lg:col-start-2 lg:row-start-2 lg:w-100"
-              : "lg:sticky lg:top-20 lg:self-start"
+              : view === "results"
+                ? // Out of sight but still on the page: removed or hidden, it stops the music.
+                  "pointer-events-none fixed left-0 top-0 size-px overflow-hidden opacity-0"
+                : "lg:sticky lg:top-20 lg:self-start"
           }`}
         >
           <div className="relative aspect-video overflow-hidden rounded-card bg-elevated shadow-2xl shadow-black/50 ring-1 ring-white/10">
@@ -650,7 +699,7 @@ export default function YouTube() {
           className={
             view === "home"
               ? "contents"
-              : `flex min-w-0 flex-col ${track ? "" : "lg:col-span-2"}`
+              : `flex min-w-0 flex-col ${track && view !== "results" ? "" : "lg:col-span-2"}`
           }
         >
           {view === "results" && searching && <SkeletonRows />}
@@ -824,8 +873,8 @@ export default function YouTube() {
                     onPlay={() => {
                       if (now) return toggle();
                       if (at >= 0) return play(at);
-                      startRadio(t);
-                      setView("next");
+                      startRadio(t, results);
+                      switchTo("next");
                     }}
                     onAddTo={() => setAddTo(t)}
                   />

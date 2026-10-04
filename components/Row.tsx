@@ -59,6 +59,8 @@ export function ClearButton({
 }) {
   return (
     <button
+      // Inside a search form, a default (submit) button is what Enter presses.
+      type="button"
       onClick={onClick}
       aria-label={label}
       title={label}

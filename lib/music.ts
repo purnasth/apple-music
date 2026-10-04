@@ -21,6 +21,8 @@ export type Track = {
   words?: string;
   /** A YouTube video's width over its height. */
   aspect?: number;
+  /** The YouTube channel that uploaded it. */
+  channel?: string;
 };
 
 /* ---------- Deezer search (public API, no key) ----------
