@@ -273,11 +273,18 @@ export function getRecent(): Track[] {
   }
 }
 
-/** Move the track to the head, keep the last 20, and hand back the new list. */
+/** The newest `n` of each source, in order, so a YouTube station can't push the library out. */
+export function keepRecent(list: Track[], n = 20): Track[] {
+  let yt = 0;
+  let lib = 0;
+  return list.filter((t) => (t.id.startsWith('yt:') ? ++yt : ++lib) <= n);
+}
+
+/** Move the track to the head, keep the last 20 of each source, and hand back the new list. */
 export function pushRecent(t: Track): Track[] {
   // Object URLs for local artwork are per-session, so drop them before persisting.
   const head = t.local ? { ...t, artwork: undefined } : t;
-  const list = [head, ...getRecent().filter((x) => x.id !== t.id)].slice(0, 20);
+  const list = keepRecent([head, ...getRecent().filter((x) => x.id !== t.id)]);
   localStorage.setItem(RECENT_KEY, JSON.stringify(list));
   return list;
 }
@@ -349,7 +356,8 @@ export function monthStats(plays: Plays, now = new Date()): Month | null {
 /**
  * Artists by plays since a moment. A collaboration counts for each credited
  * artist; the cover is that of their most played song, the spelling the one
- * credited most often.
+ * credited most often. Artists heard only together, on exactly the same songs,
+ * are one entry ("Aashir Wajahat & gini") until one is heard without the other.
  */
 export function topArtists(plays: Plays, since = 0, limit = 8) {
   type Acc = {
@@ -358,13 +366,21 @@ export function topArtists(plays: Plays, since = 0, limit = 8) {
     art?: string;
     best: number;
     sources: Set<Source>;
+    songs: Set<string>;
   };
   const by = new Map<string, Acc>();
   for (const { track, n } of mostPlayed(plays, since, Infinity))
     for (const name of artistsOf(track.artist)) {
       const key = name.toLowerCase();
-      const a: Acc = by.get(key) ?? { n: 0, spellings: new Map(), best: 0, sources: new Set() };
+      const a: Acc = by.get(key) ?? {
+        n: 0,
+        spellings: new Map(),
+        best: 0,
+        sources: new Set(),
+        songs: new Set(),
+      };
       a.n += n;
+      a.songs.add(track.id);
       a.sources.add(track.id.startsWith('yt:') ? 'youtube' : 'library');
       a.spellings.set(name, (a.spellings.get(name) ?? 0) + n);
       if (n > a.best) {
@@ -373,9 +389,17 @@ export function topArtists(plays: Plays, since = 0, limit = 8) {
       }
       by.set(key, a);
     }
-  return [...by.values()]
-    .map((a) => ({
-      name: [...a.spellings].sort((x, y) => y[1] - x[1])[0][0],
+  const groups = new Map<string, { names: string[]; a: Acc }>();
+  for (const a of by.values()) {
+    const name = [...a.spellings].sort((x, y) => y[1] - x[1])[0][0];
+    const same = [...a.songs].sort().join('\n');
+    const g = groups.get(same);
+    if (g) g.names.push(name);
+    else groups.set(same, { names: [name], a });
+  }
+  return [...groups.values()]
+    .map(({ names, a }) => ({
+      name: names.join(' & '),
       n: a.n,
       art: a.art,
       sources: [...a.sources],

@@ -1,22 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  search,
-  current,
-  fmtTime,
-  fmtTotal,
-  folderOf,
-  shuffled,
-  artistsOf,
-  encodePlaylist,
-  decodePlaylist,
-  encodeBackup,
-  decodeBackup,
-  mostPlayed,
-  topArtists,
-  type Plays,
-  type Track,
-} from './music.ts';
+import { search, current, fmtTime, fmtTotal, folderOf, shuffled, artistsOf, encodePlaylist, decodePlaylist, encodeBackup, decodeBackup, mostPlayed, topArtists, type Plays, type Track, keepRecent } from './music.ts';
 
 test('fmtTime formats and survives junk', () => {
   assert.equal(fmtTime(0), '0:00');
@@ -220,4 +204,34 @@ test('mostPlayed and topArtists rank by plays in range, splitting collaborations
   // An artist heard on YouTube and from the library carries both.
   plays['yt:x'] = { t: t('yt:x', 'Swar'), at: [400] };
   assert.deepEqual(topArtists(plays, 100)[0].sources, ['library', 'youtube']);
+});
+
+test('keepRecent keeps the newest 20 of each source, so YouTube cannot crowd out the library', () => {
+  const t = (id: string): Track => ({ id, title: id, artist: '', album: '' });
+  const list = [
+    ...Array.from({ length: 25 }, (_, i) => t(`yt:${i}`)),
+    t('file:a'),
+    t('file:b'),
+  ];
+  const kept = keepRecent(list);
+  assert.equal(kept.filter((x) => x.id.startsWith('yt:')).length, 20);
+  assert.deepEqual(kept.slice(-2).map((x) => x.id), ['file:a', 'file:b']);
+  assert.equal(kept[0].id, 'yt:0');
+});
+
+test('topArtists shows artists heard only together as one entry, and splits them once they are not', () => {
+  const t = (id: string, artist: string): Track => ({ id, title: id, artist, album: '' });
+  const plays: Plays = {
+    a: { t: t('a', 'Aashir Wajahat & gini'), at: [100, 200, 300, 400] },
+    b: { t: t('b', 'Sushant KC'), at: [100] },
+  };
+  assert.deepEqual(
+    topArtists(plays).map((x) => [x.name, x.n]),
+    [['Aashir Wajahat & gini', 4], ['Sushant KC', 1]],
+  );
+  plays.c = { t: t('c', 'gini'), at: [500] };
+  assert.deepEqual(
+    topArtists(plays).map((x) => [x.name, x.n]),
+    [['gini', 5], ['Aashir Wajahat', 4], ['Sushant KC', 1]],
+  );
 });

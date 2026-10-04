@@ -801,7 +801,6 @@ export default function Home() {
       : tab === "library"
         ? inLibrary
         : (detail?.tracks ?? []);
-  const mixed = shown.some(isYouTube) && !shown.every(isYouTube);
 
   /** Nothing to list, so the message stands in for the list and takes its room.
       The playlists grid carries its own empty state, hence the detail check. */
@@ -839,7 +838,7 @@ export default function Home() {
         )}
 
         {tab === "library" && !!recent.length && (
-          <RecentStrip tracks={recent} onPlay={(i) => play(recent, i)} />
+          <RecentStrip tracks={recent} onPlay={(i) => play(recent, i)} mark />
         )}
 
         {tab === "library" && !!library.length && (
@@ -1064,7 +1063,8 @@ export default function Home() {
             onToggle={() => setPlaying(!playing)}
             smart={smart}
             month={month}
-            onArtist={(name) => goTo("artist", name)}
+            // A pair heard only together shows as "A & B"; the library knows them one by one.
+            onArtist={(name) => goTo("artist", artistsOf(name)[0])}
           />
         )}
 
@@ -1125,7 +1125,7 @@ export default function Home() {
                 ) : undefined
               }
               plays={detail?.smart ? counts.get(track.id) : undefined}
-              mark={mixed}
+              mark
               onAddTo={() => setAddTo(track)}
               onRemove={
                 // Bundled tracks ship with the site; removeTrack can't evict one, it would just reappear.

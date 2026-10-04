@@ -6,10 +6,12 @@ import {
   TbBrandYoutube,
   TbExternalLink,
   TbPlayerPlayFilled,
+  TbPlaylist,
   TbSearch,
 } from "react-icons/tb";
 import { Masthead, TabBar } from "@/components/AppNav";
 import { PlayerBar } from "@/components/Player";
+import { Btn } from "@/components/PlayerKit";
 import { ClearButton, RecentStrip, Row, SkeletonRows } from "@/components/Row";
 import { AddToSheet, MonthSection, Mosaic } from "@/components/Playlists";
 import { toast } from "@/lib/toast";
@@ -76,6 +78,13 @@ const PLAYING = 1;
 const PAUSED = 2;
 const CUED = 5;
 
+/**
+ * How long the For you tile keeps the cover up after playback settles. YouTube's
+ * overlay outlasts its own 3s timer by its fade: 3.5s still let it peek through,
+ * 5s hid it with time to spare.
+ */
+const VEIL_MS = 4000;
+
 /** Up next keeps at least this many songs ahead of the one playing. */
 const AHEAD = 20;
 
@@ -132,7 +141,6 @@ export default function YouTube() {
   const [plays, setPlays] = useState<Plays>({});
 
   const host = useRef<HTMLDivElement>(null);
-  const stage = useRef<HTMLElement>(null);
   const player = useRef<YTPlayer | null>(null);
   // A second, never-playing player reads Mixes, so the one playing is never interrupted.
   const scoutHost = useRef<HTMLDivElement>(null);
@@ -144,6 +152,9 @@ export default function YouTube() {
   const more = useRef<HTMLDivElement>(null);
   const unshuffled = useRef<Track[] | null>(null);
   const lastTime = useRef(0);
+  // YouTube flashes its own title and controls on every state change; see VEIL_MS.
+  const [veiled, setVeiled] = useState(true);
+  const unveil = useRef(0);
   // YouTube's callbacks outlive renders, so they read the latest state from here.
   const live = useRef({ queue, index, repeatOne, onEnded: () => {} });
 
@@ -164,7 +175,6 @@ export default function YouTube() {
     seeded.current.clear();
     setShuffle(false);
     setQueue(tracks);
-    setView("next");
     play(i, tracks);
   }
 
@@ -242,7 +252,6 @@ export default function YouTube() {
     unshuffled.current = null;
     seeded.current.clear();
     setShuffle(false);
-    setView("next");
     setQueue([t]);
     play(0, [t]);
   }
@@ -310,6 +319,10 @@ export default function YouTube() {
             } else player.current!.cueVideoById(videoId(t));
           },
           onStateChange: ({ data }) => {
+            setVeiled(true);
+            clearTimeout(unveil.current);
+            if (data === PLAYING)
+              unveil.current = window.setTimeout(() => setVeiled(false), VEIL_MS);
             if (data === PLAYING) setPlaying(true);
             if (data === PAUSED || data === ENDED) setPlaying(false);
             if (data === ENDED) live.current.onEnded();
@@ -453,6 +466,13 @@ export default function YouTube() {
     });
   };
 
+  /** From the player bar, which can be far down the page: land at the top of the view. */
+  const switchTo = (v: typeof view) => {
+    setView(v);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const toggleUpNext = () => switchTo(view === "next" ? "home" : "next");
+
   // The main player's keys, the ones that make sense for a video.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -469,6 +489,7 @@ export default function YouTube() {
         KeyM: () => setMuted(!muted),
         KeyS: toggleShuffle,
         KeyR: toggleRepeat,
+        KeyQ: toggleUpNext,
       };
       if (e.shiftKey) Object.assign(keys, { KeyN: next, KeyP: prev });
       const run = keys[e.code];
@@ -590,23 +611,36 @@ export default function YouTube() {
         </div>
 
         <section
-          ref={stage}
-          className={`scroll-mt-20 ${track ? "" : "hidden"} ${
+          className={`${track ? "" : "hidden"} ${
             view === "home"
               ? "pointer-events-none lg:col-start-2 lg:row-start-2 lg:w-100"
               : "lg:sticky lg:top-20 lg:self-start"
           }`}
         >
-          <div className="aspect-video overflow-hidden rounded-card bg-elevated shadow-2xl shadow-black/50 ring-1 ring-white/10">
-            {/* YouTube pads a video that isn't 16:9 with black; zooming by the
-                mismatch fills the tile, the way object-fit: cover would. */}
+          <div className="relative aspect-video overflow-hidden rounded-card bg-elevated shadow-2xl shadow-black/50 ring-1 ring-white/10">
+            {/* YouTube pads a video that isn't 16:9 with black, and many uploads
+                have bars baked into the picture that no API reports. The tile is
+                only a screen, so it always zooms past typical bars, or further when
+                the video's own shape needs it, the way object-fit: cover would. */}
             <div
               ref={host}
               className="size-full transition-transform duration-300"
               style={{
-                transform: `scale(${view === "home" ? cover(track?.aspect) : 1})`,
+                transform: `scale(${view === "home" ? Math.max(cover(track?.aspect), 1.34) : 1})`,
               }}
             />
+            {/* On For you the cover stands in while YouTube's overlay is up. */}
+            {view === "home" && (track?.artworkLarge ?? track?.artwork) && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={track.artworkLarge ?? track.artwork}
+                alt=""
+                aria-hidden
+                className={`absolute inset-0 size-full object-cover transition-opacity duration-500 ${
+                  veiled ? "opacity-100" : "opacity-0"
+                }`}
+              />
+            )}
           </div>
         </section>
 
@@ -787,9 +821,12 @@ export default function YouTube() {
                     track={t}
                     active={now}
                     playing={now && playing}
-                    onPlay={() =>
-                      now ? toggle() : at >= 0 ? play(at) : startRadio(t)
-                    }
+                    onPlay={() => {
+                      if (now) return toggle();
+                      if (at >= 0) return play(at);
+                      startRadio(t);
+                      setView("next");
+                    }}
                     onAddTo={() => setAddTo(t)}
                   />
                 );
@@ -812,7 +849,7 @@ export default function YouTube() {
           track={track}
           playing={playing}
           onToggle={toggle}
-          onOpen={() => stage.current?.scrollIntoView({ behavior: "smooth" })}
+          onOpen={() => switchTo("next")}
           time={time}
           dur={dur || track.duration || 0}
           buffered={buffered}
@@ -828,6 +865,13 @@ export default function YouTube() {
           muted={muted}
           setMuted={setMuted}
         >
+          <Btn
+            onClick={toggleUpNext}
+            active={view === "next"}
+            label="Up next (Q)"
+          >
+            <TbPlaylist />
+          </Btn>
           <a
             href={track.appleUrl}
             target="_blank"

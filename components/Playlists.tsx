@@ -341,13 +341,13 @@ function SheetRow({
 export function MonthSection({
   month,
   onArtist,
+  mark,
 }: {
   month: Month;
   onArtist: (name: string) => void;
+  /** Tag artists heard on YouTube, as Row's `mark` does. */
+  mark?: boolean;
 }) {
-  const mixed =
-    month.artists.some((a) => a.sources.includes("youtube")) &&
-    month.artists.some((a) => a.sources.includes("library"));
   return (
     <section className="mb-8">
       <div className="mb-3 flex items-baseline justify-between gap-2">
@@ -364,7 +364,7 @@ export function MonthSection({
             key={a.name}
             onClick={() => onArtist(a.name)}
             title={`${a.name}: ${playsOf(a.n)} this month${
-              mixed ? ` · ${a.sources.map((s) => SOURCE[s].label).join(" and ")}` : ""
+              mark ? ` · ${a.sources.map((s) => SOURCE[s].label).join(" and ")}` : ""
             }`}
             className="w-20 shrink-0 text-center transition hover:opacity-80"
           >
@@ -384,8 +384,8 @@ export function MonthSection({
               <span className="absolute -left-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-canvas px-1 text-[10px] font-semibold tabular-nums ring-1 ring-separator">
                 {i + 1}
               </span>
-              {mixed && a.sources.includes("youtube") && (
-                <YouTubeMark className="bottom-0 right-0 size-5 ring-1 ring-separator" size={13} />
+              {mark && a.sources.includes("youtube") && (
+                <YouTubeMark />
               )}
             </span>
             <span className="mt-1.5 block truncate text-xs font-medium">
@@ -459,7 +459,7 @@ export function PlaylistsView({
 
   return (
     <div className="mb-6">
-      {month && <MonthSection month={month} onArtist={onArtist} />}
+      {month && <MonthSection month={month} onArtist={onArtist} mark />}
 
       <div className="mb-4 flex items-center justify-between gap-2">
         <h2 className="shrink-0 text-xl font-semibold tracking-tight">

@@ -13,20 +13,22 @@ import { Logo } from "@/components/Logo";
 import { Track, fmtTime, isPreview } from "@/lib/music";
 import { isYouTube } from "@/lib/youtube";
 
-/** Tags a YouTube song (or artist) in a list that mixes both kinds. */
+/** Tags a YouTube song or artist at the foot of its cover; `small` suits a 44px row cover. */
 export function YouTubeMark({
-  className = "-bottom-1 -right-1 size-4",
-  size = 11,
+  className = "bottom-0 right-0",
+  small,
 }: {
   className?: string;
-  size?: number;
+  small?: boolean;
 }) {
   return (
     <span
       title="YouTube"
-      className={`pointer-events-none absolute grid place-items-center rounded-full bg-canvas text-[#ff0033] ${className}`}
+      className={`pointer-events-none absolute grid place-items-center rounded-full bg-canvas text-[#ff0033] ring-1 ring-separator ${
+        small ? "size-4" : "size-5"
+      } ${className}`}
     >
-      <TbBrandYoutubeFilled size={size} aria-label="YouTube" />
+      <TbBrandYoutubeFilled size={small ? 11 : 13} aria-label="YouTube" />
     </span>
   );
 }
@@ -88,7 +90,7 @@ export function Row({
   /** A third line: the lyric a search matched. */
   note?: React.ReactNode;
   plays?: number;
-  /** Tag YouTube songs: set when the list mixes them with the library. */
+  /** Tag YouTube songs: set on the main page, where they sit among the library's. */
   mark?: boolean;
 }) {
   return (
@@ -126,7 +128,9 @@ export function Row({
             <TbPlayerPlayFilled size={15} />
           )}
         </span>
-        {mark && isYouTube(track) && <YouTubeMark />}
+        {mark && isYouTube(track) && (
+          <YouTubeMark small className="-bottom-1 -right-1" />
+        )}
       </button>
 
       <button
@@ -218,12 +222,14 @@ export function RecentStrip({
   tracks,
   onPlay,
   title = "Recently played",
+  mark,
 }: {
   tracks: Track[];
   onPlay: (i: number) => void;
   title?: string;
+  /** Tag YouTube songs, as Row's `mark` does. */
+  mark?: boolean;
 }) {
-  const mixed = tracks.some(isYouTube) && !tracks.every(isYouTube);
   return (
     <section className="mb-5">
       <h2 className="mb-2 truncate text-xs font-semibold uppercase tracking-widest text-label-3">
@@ -250,7 +256,7 @@ export function RecentStrip({
                   <TbMusic size={24} />
                 </div>
               )}
-              {mixed && isYouTube(t) && <YouTubeMark />}
+              {mark && isYouTube(t) && <YouTubeMark className="-bottom-2 -right-2" />}
             </span>
             <div className="mt-1.5 truncate text-xs font-medium">
               {t.title}
