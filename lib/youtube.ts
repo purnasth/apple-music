@@ -87,6 +87,31 @@ export async function videos(ids: string[]): Promise<Track[]> {
   return ids.map((id) => byId.get(id)).filter((t): t is Track => !!t);
 }
 
+/**
+ * The song inside a video's title, for a lyrics lookup: "Yabesh Thapa - Tadha ft.
+ * Oshin Karki | OFFICIAL MUSIC VIDEO" is Tadha by Yabesh Thapa.
+ */
+export function songOf(t: Track): Track {
+  let title = t.title;
+  let artist = t.artist;
+  const dash = /^(.+?)\s[-–—]\s(.+)$/.exec(title);
+  if (dash) [, artist, title] = dash;
+  title = title
+    .split(/\s*[|([]/)[0]
+    .replace(/\s+(ft|feat)\.?\s.*$/i, "")
+    .trim();
+  return { ...t, title: title || t.title, artist: artist.trim(), album: "" };
+}
+
+/** A video's description, for when there is nothing else to show about it: 1 unit. */
+export async function aboutVideo(id: string): Promise<string> {
+  const data = await api<{ items: { snippet: { description?: string } }[] }>("videos", {
+    part: "snippet",
+    id,
+  });
+  return data.items[0]?.snippet.description?.trim() ?? "";
+}
+
 /** Today's most popular music videos, for a listener with no history yet: 1 unit. */
 export async function musicChart(): Promise<Track[]> {
   const region = navigator.language.split("-")[1];

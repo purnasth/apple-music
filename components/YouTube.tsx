@@ -1,19 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { RefObject, useEffect, useRef, useState } from "react";
 import {
   TbArrowsShuffle,
   TbBrandYoutube,
   TbExternalLink,
+  TbMicrophone2,
   TbPlayerPlayFilled,
+  TbArrowsMaximize,
   TbPlaylist,
+  TbPlaylistAdd,
   TbSearch,
+  TbShare3,
+  TbViewportNarrow,
+  TbViewportWide,
 } from "react-icons/tb";
 import { Masthead, TabBar } from "@/components/AppNav";
 import { PlayerBar } from "@/components/Player";
 import { Btn } from "@/components/PlayerKit";
 import { ClearButton, RecentStrip, Row, SkeletonRows } from "@/components/Row";
 import { AddToSheet, MonthSection, Mosaic } from "@/components/Playlists";
+import LyricsPanel from "@/components/Lyrics";
+import { getLyrics } from "@/lib/lyrics";
 import { toast } from "@/lib/toast";
 import {
   Plays,
@@ -30,12 +38,14 @@ import {
   shuffled,
 } from "@/lib/music";
 import {
+  aboutVideo,
   cover,
   getYtSession,
   hasKey,
   isYouTube,
   musicChart,
   saveYtSession,
+  songOf,
   searchYouTube,
   videoId,
   videos,
@@ -126,6 +136,9 @@ export default function YouTube() {
   const [repeatOne, setRepeatOne] = useState(false);
   const [radioLoading, setRadioLoading] = useState(false);
   const [apiReady, setApiReady] = useState(false);
+  // Up next with the video across the page and the list below, as YouTube's theater.
+  const [theater, setTheater] = useState(false);
+  const [lyricsOn, setLyricsOn] = useState(true);
   const [atEnd, setAtEnd] = useState(false);
   // What For you opens on: your own favourites, or the chart before you have any.
   const [picks, setPicks] = useState<{ tracks: Track[]; mine: boolean } | null>(
@@ -141,6 +154,16 @@ export default function YouTube() {
   const [plays, setPlays] = useState<Plays>({});
 
   const host = useRef<HTMLDivElement>(null);
+  const screen = useRef<HTMLDivElement>(null);
+  // The lyrics panel reads and sets an audio element's time; YouTube's player stands in.
+  const clock = useRef({
+    get currentTime() {
+      return player.current?.getCurrentTime() ?? 0;
+    },
+    set currentTime(t: number) {
+      player.current?.seekTo(t, true);
+    },
+  } as unknown as HTMLAudioElement);
   // Set once the player reports ready: before that its methods don't exist yet.
   const player = useRef<YTPlayer | null>(null);
   // A pick made while the player was still loading, played the moment it's ready.
@@ -338,6 +361,9 @@ export default function YouTube() {
     setPlaylists(getPlaylists());
     setRecent(getRecent());
     setPlays(getPlays());
+    try {
+      setTheater(!!localStorage.getItem("yt-theater"));
+    } catch {}
     loadPicks();
     const s = getYtSession();
     if (!s) setView("home");
@@ -519,6 +545,19 @@ export default function YouTube() {
   };
   const toggleUpNext = () => switchTo(view === "next" ? "home" : "next");
 
+  const toggleTheater = () => {
+    setTheater(!theater);
+    try {
+      localStorage.setItem("yt-theater", theater ? "" : "1");
+    } catch {}
+  };
+
+  /** The video alone, filling the screen; Escape brings it back. */
+  const fullScreen = () => {
+    if (document.fullscreenElement) return void document.exitFullscreen();
+    screen.current?.requestFullscreen().catch(() => {});
+  };
+
   // The main player's keys, the ones that make sense for a video.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -537,6 +576,12 @@ export default function YouTube() {
         KeyR: toggleRepeat,
         KeyQ: toggleUpNext,
       };
+      if (view === "next")
+        Object.assign(keys, {
+          KeyT: toggleTheater,
+          KeyF: fullScreen,
+          KeyY: () => setLyricsOn(!lyricsOn),
+        });
       if (e.shiftKey) Object.assign(keys, { KeyN: next, KeyP: prev });
       const run = keys[e.code];
       if (!run) return;
@@ -628,7 +673,7 @@ export default function YouTube() {
             : "lg:grid-cols-[minmax(0,1fr)_400px]"
         }`}
       >
-        <div className="col-span-full flex flex-wrap gap-2">
+        <div className="col-span-full flex flex-wrap items-center gap-2">
           {(
             [
               ["home", "For you"],
@@ -654,6 +699,20 @@ export default function YouTube() {
                   : ""}
             </button>
           ))}
+          {view === "next" && track && (
+            <div className="ml-auto hidden items-center gap-1 lg:flex">
+              <Btn
+                onClick={toggleTheater}
+                active={theater}
+                label={theater ? "Default view (T)" : "Theater mode (T)"}
+              >
+                {theater ? <TbViewportNarrow /> : <TbViewportWide />}
+              </Btn>
+              <Btn onClick={fullScreen} label="Full screen (F)">
+                <TbArrowsMaximize />
+              </Btn>
+            </div>
+          )}
         </div>
 
         <section
@@ -663,10 +722,15 @@ export default function YouTube() {
               : view === "results"
                 ? // Out of sight but still on the page: removed or hidden, it stops the music.
                   "pointer-events-none fixed left-0 top-0 size-px overflow-hidden opacity-0"
-                : "lg:sticky lg:top-20 lg:self-start"
+                : theater
+                  ? "lg:col-span-2"
+                  : "lg:sticky lg:top-20 lg:self-start"
           }`}
         >
-          <div className="relative aspect-video overflow-hidden rounded-card bg-elevated shadow-2xl shadow-black/50 ring-1 ring-white/10">
+          <div
+            ref={screen}
+            className="relative aspect-video overflow-hidden rounded-card bg-elevated shadow-2xl shadow-black/50 ring-1 ring-white/10 [&:fullscreen]:rounded-none [&:fullscreen]:bg-black"
+          >
             {/* YouTube pads a video that isn't 16:9 with black, and many uploads
                 have bars baked into the picture that no API reports. The tile is
                 only a screen, so it always zooms past typical bars, or further when
@@ -691,6 +755,16 @@ export default function YouTube() {
               />
             )}
           </div>
+          {view === "next" && !theater && track && (
+            <NowPlaying
+              key={track.id}
+              track={track}
+              clock={clock}
+              onAddTo={() => setAddTo(track)}
+              lyricsOn={lyricsOn}
+              toggleLyrics={() => setLyricsOn(!lyricsOn)}
+            />
+          )}
         </section>
 
         {/* For you lays its blocks straight into the page grid, so its first
@@ -699,7 +773,7 @@ export default function YouTube() {
           className={
             view === "home"
               ? "contents"
-              : `flex min-w-0 flex-col ${track && view !== "results" ? "" : "lg:col-span-2"}`
+              : `flex min-w-0 flex-col ${track && view !== "results" && !(view === "next" && theater) ? "" : "lg:col-span-2"}`
           }
         >
           {view === "results" && searching && <SkeletonRows />}
@@ -921,6 +995,7 @@ export default function YouTube() {
           >
             <TbPlaylist />
           </Btn>
+
           <a
             href={track.appleUrl}
             target="_blank"
@@ -970,6 +1045,109 @@ export default function YouTube() {
           onQueue={(mode) => enqueue(addTo, mode)}
           onClose={() => setAddTo(null)}
         />
+      )}
+    </div>
+  );
+}
+
+/** Under the video on Up next: what's playing, and its lyrics or, failing those, its description. */
+function NowPlaying({
+  track,
+  clock,
+  onAddTo,
+  lyricsOn,
+  toggleLyrics,
+}: {
+  track: Track;
+  clock: RefObject<HTMLAudioElement>;
+  onAddTo: () => void;
+  lyricsOn: boolean;
+  toggleLyrics: () => void;
+}) {
+  const song = songOf(track);
+  const [lyrics, setLyrics] = useState<boolean | null>(null);
+  const [about, setAbout] = useState("");
+
+  useEffect(() => {
+    let gone = false;
+    getLyrics(song)
+      .then((l) => !gone && setLyrics(!!l))
+      .catch(() => !gone && setLyrics(false));
+    return () => void (gone = true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by track.id
+  }, []);
+
+  const showLyrics = lyrics !== false && lyricsOn;
+
+  useEffect(() => {
+    if (showLyrics || about || !hasKey) return;
+    let gone = false;
+    aboutVideo(videoId(track))
+      .then((d) => !gone && setAbout(d))
+      .catch(() => {});
+    return () => void (gone = true);
+  }, [showLyrics, about, track]);
+
+  const share = async () => {
+    const url = track.appleUrl!;
+    try {
+      if (navigator.share) return await navigator.share({ title: track.title, url });
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copied", { description: `${track.title} — ${track.artist}` });
+    } catch {}
+  };
+
+  return (
+    <div className="mt-4 hidden lg:block">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="line-clamp-2 text-lg font-semibold tracking-tight">
+            {track.title}
+          </h2>
+          <p className="mt-0.5 truncate text-sm text-label-2">{track.artist}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Btn
+            onClick={toggleLyrics}
+            active={lyrics !== false && lyricsOn}
+            label="Lyrics (Y)"
+            unavailable={lyrics === false && "No lyrics for this song"}
+            busy={lyrics === null && "Looking for lyrics…"}
+          >
+            <TbMicrophone2 />
+          </Btn>
+          <Btn onClick={onAddTo} label="Add to playlist or queue">
+            <TbPlaylistAdd />
+          </Btn>
+          <Btn onClick={share} label="Share">
+            <TbShare3 />
+          </Btn>
+          <a
+            href={track.appleUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open on YouTube"
+            title="Open on YouTube"
+            className="grid h-8 w-8 place-items-center rounded-full text-sm text-label-2 transition hover:bg-fill hover:text-label"
+          >
+            <TbExternalLink />
+          </a>
+        </div>
+      </div>
+
+      {showLyrics ? (
+        // Sized to what's left of the screen, so the sticky column never outgrows it.
+        // LRCLIB times lines, not words: a line lights whole when it starts rather
+        // than filling at a guessed pace.
+        <div className="relative mt-2 h-[max(14rem,calc(100dvh-40rem))] [&_.lyric-line]:text-xl! [&_.lyric-plain]:text-base! [&_.lyric-text]:[--p:1]!">
+          <LyricsPanel track={song} audio={clock} />
+        </div>
+      ) : (
+        about && (
+          <p className="mt-3 line-clamp-[10] whitespace-pre-line text-sm text-label-2">
+            {about}
+          </p>
+        )
       )}
     </div>
   );
