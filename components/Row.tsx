@@ -213,19 +213,21 @@ export function Row({
   );
 }
 
-/** The last songs heard, as a row of covers. */
+/** A shelf of covers: the last songs heard, unless `title` says otherwise. */
 export function RecentStrip({
   tracks,
   onPlay,
+  title = "Recently played",
 }: {
   tracks: Track[];
   onPlay: (i: number) => void;
+  title?: string;
 }) {
   const mixed = tracks.some(isYouTube) && !tracks.every(isYouTube);
   return (
     <section className="mb-5">
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-label-3">
-        Recently played
+      <h2 className="mb-2 truncate text-xs font-semibold uppercase tracking-widest text-label-3">
+        {title}
       </h2>
       <div className="flex gap-3 overflow-x-auto pb-1">
         {tracks.map((t, i) => (

@@ -11,7 +11,7 @@ import {
 import { Masthead, TabBar } from "@/components/AppNav";
 import { PlayerBar } from "@/components/Player";
 import { ClearButton, RecentStrip, Row, SkeletonRows } from "@/components/Row";
-import { AddToSheet, MonthSection } from "@/components/Playlists";
+import { AddToSheet, MonthSection, Mosaic } from "@/components/Playlists";
 import { toast } from "@/lib/toast";
 import {
   Plays,
@@ -28,9 +28,11 @@ import {
   shuffled,
 } from "@/lib/music";
 import {
+  cover,
   getYtSession,
   hasKey,
   isYouTube,
+  musicChart,
   saveYtSession,
   searchYouTube,
   videoId,
@@ -77,6 +79,10 @@ const CUED = 5;
 /** Up next keeps at least this many songs ahead of the one playing. */
 const AHEAD = 20;
 
+/** "Good morning", "Good afternoon" or "Good evening", by the clock here. */
+const greeting = (h = new Date().getHours()) =>
+  h < 5 ? "Good evening" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+
 let api: Promise<YTGlobal> | undefined;
 
 /** YouTube's IFrame Player API, loaded once. */
@@ -97,7 +103,7 @@ export default function YouTube() {
   const [results, setResults] = useState<Track[]>([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
-  const [view, setView] = useState<"listening" | "next" | "results">("next");
+  const [view, setView] = useState<"home" | "next" | "results">("next");
 
   const [queue, setQueue] = useState<Track[]>([]);
   const [index, setIndex] = useState(0);
@@ -112,6 +118,13 @@ export default function YouTube() {
   const [radioLoading, setRadioLoading] = useState(false);
   const [scoutReady, setScoutReady] = useState(false);
   const [atEnd, setAtEnd] = useState(false);
+  // What For you opens on: your own favourites, or the chart before you have any.
+  const [picks, setPicks] = useState<{ tracks: Track[]; mine: boolean } | null>(
+    null,
+  );
+  const [similar, setSimilar] = useState<{ seed: Track; tracks: Track[] } | null>(
+    null,
+  );
 
   const [addTo, setAddTo] = useState<Track | null>(null);
   const [playlists, setPlaylists] = useState<Playlists>({});
@@ -125,6 +138,7 @@ export default function YouTube() {
   const scoutHost = useRef<HTMLDivElement>(null);
   const scout = useRef<Promise<YTPlayer> | null>(null);
   const cued = useRef<(() => void) | null>(null);
+  const scoutBusy = useRef<Promise<unknown>>(Promise.resolve());
   const extending = useRef(false);
   const seeded = useRef(new Set<string>());
   const more = useRef<HTMLDivElement>(null);
@@ -155,7 +169,14 @@ export default function YouTube() {
   }
 
   /** YouTube's own Mix for a song, read by cueing it in the scout: no API quota. */
-  async function mixOf(t: Track): Promise<string[]> {
+  function mixOf(t: Track): Promise<string[]> {
+    // One cue at a time: the scout has a single playlist and a single "cued".
+    const run = scoutBusy.current.then(() => readMix(t));
+    scoutBusy.current = run.catch(() => {});
+    return run;
+  }
+
+  async function readMix(t: Track): Promise<string[]> {
     const p = await scout.current!;
     const ready = new Promise<void>((r) => {
       cued.current = r;
@@ -199,6 +220,23 @@ export default function YouTube() {
     }
   }
 
+  /** Your most played and recent YouTube songs, shuffled; the chart if there are none. */
+  async function loadPicks() {
+    const yt = Object.fromEntries(
+      Object.entries(getPlays()).filter(([id]) => id.startsWith("yt:")),
+    );
+    const seen = new Set<string>();
+    const mine = [
+      ...mostPlayed(yt, 0, 12).map((x) => x.track),
+      ...getRecent().filter(isYouTube),
+    ].filter((t) => !seen.has(t.id) && seen.add(t.id));
+    if (mine.length)
+      return setPicks({ tracks: shuffled(mine.slice(0, 12)), mine: true });
+    if (!hasKey) return;
+    const chart = await musicChart().catch(() => []);
+    setPicks({ tracks: chart.slice(0, 12), mine: false });
+  }
+
   /** A search pick starts a station: the song now, its Mix right behind it. */
   function startRadio(t: Track) {
     unshuffled.current = null;
@@ -231,8 +269,9 @@ export default function YouTube() {
     setPlaylists(getPlaylists());
     setRecent(getRecent());
     setPlays(getPlays());
+    loadPicks();
     const s = getYtSession();
-    if (!s) setView("listening");
+    if (!s) setView("home");
     let gone = false;
     loadApi().then((YT) => {
       if (gone) return;
@@ -306,6 +345,36 @@ export default function YouTube() {
     io.observe(el);
     return () => io.disconnect();
   }, [view, hasQueue]);
+
+  // "More like" your top song, read once from its Mix.
+  const seedPick = picks?.mine ? picks.tracks[0] : undefined;
+  useEffect(() => {
+    if (!scoutReady || !seedPick || !hasKey) return;
+    let gone = false;
+    mixOf(seedPick)
+      .then((ids) =>
+        videos(ids.filter((id) => id !== videoId(seedPick)).slice(0, 15)),
+      )
+      .then((tracks) => !gone && setSimilar({ seed: seedPick, tracks }))
+      .catch(() => {});
+    return () => void (gone = true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoutReady, seedPick]);
+
+  // Songs saved before tracks carried their aspect learn it when they play: 1 unit.
+  const asked = useRef(new Set<string>());
+  useEffect(() => {
+    if (!track || track.aspect || !hasKey || asked.current.has(track.id)) return;
+    asked.current.add(track.id);
+    videos([videoId(track)])
+      .then(([v]) => {
+        if (!v?.aspect) return;
+        setQueue((q) =>
+          q.map((t) => (t.id === v.id ? { ...t, aspect: v.aspect } : t)),
+        );
+      })
+      .catch(() => {});
+  }, [track]);
 
   // The iframe has no time events, so the clock is polled.
   useEffect(() => {
@@ -450,7 +519,7 @@ export default function YouTube() {
   const list =
     view === "results" ? results : view === "next" ? queue.slice(index) : [];
   const empty =
-    view !== "listening" &&
+    view !== "home" &&
     !list.length &&
     !(view === "results" && (searching || error));
 
@@ -485,47 +554,71 @@ export default function YouTube() {
         </form>
       </Masthead>
 
-      <main className="mx-auto grid w-full max-w-6xl flex-1 content-start gap-x-8 gap-y-5 px-4 py-5 lg:grid-cols-[minmax(0,1fr)_400px]">
+      <main
+        className={`mx-auto grid w-full max-w-6xl flex-1 content-start gap-x-8 gap-y-5 px-4 py-5 ${
+          view === "home"
+            ? "lg:grid-cols-[minmax(0,1fr)_auto]"
+            : "lg:grid-cols-[minmax(0,1fr)_400px]"
+        }`}
+      >
+        <div className="col-span-full flex flex-wrap gap-2">
+          {(
+            [
+              ["home", "For you"],
+              ["next", "Up next"],
+              ["results", "Results"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setView(id)}
+              aria-pressed={view === id}
+              className={`h-7 rounded-full px-3 text-xs font-medium transition ${
+                view === id
+                  ? "bg-label text-canvas"
+                  : "bg-fill text-label-2 hover:bg-fill-2 hover:text-label"
+              }`}
+            >
+              {label}
+              {id === "next" && queue.length > index + 1
+                ? ` (${queue.length - index - 1})`
+                : id === "results" && results.length
+                  ? ` (${results.length})`
+                  : ""}
+            </button>
+          ))}
+        </div>
+
         <section
           ref={stage}
-          className={`scroll-mt-20 lg:sticky lg:top-20 lg:self-start ${track ? "" : "hidden"}`}
+          className={`scroll-mt-20 ${track ? "" : "hidden"} ${
+            view === "home"
+              ? "pointer-events-none lg:col-start-2 lg:row-start-2 lg:w-100"
+              : "lg:sticky lg:top-20 lg:self-start"
+          }`}
         >
           <div className="aspect-video overflow-hidden rounded-card bg-elevated shadow-2xl shadow-black/50 ring-1 ring-white/10">
-            <div ref={host} className="size-full" />
+            {/* YouTube pads a video that isn't 16:9 with black; zooming by the
+                mismatch fills the tile, the way object-fit: cover would. */}
+            <div
+              ref={host}
+              className="size-full transition-transform duration-300"
+              style={{
+                transform: `scale(${view === "home" ? cover(track?.aspect) : 1})`,
+              }}
+            />
           </div>
         </section>
 
+        {/* For you lays its blocks straight into the page grid, so its first
+            one can share a row with the video. */}
         <section
-          className={`flex min-w-0 flex-col ${track ? "" : "lg:col-span-2"}`}
+          className={
+            view === "home"
+              ? "contents"
+              : `flex min-w-0 flex-col ${track ? "" : "lg:col-span-2"}`
+          }
         >
-          <div className="mb-3 flex flex-wrap gap-2">
-            {(
-              [
-                ["listening", "Listening"],
-                ["next", "Up next"],
-                ["results", "Results"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setView(id)}
-                aria-pressed={view === id}
-                className={`h-7 rounded-full px-3 text-xs font-medium transition ${
-                  view === id
-                    ? "bg-label text-canvas"
-                    : "bg-fill text-label-2 hover:bg-fill-2 hover:text-label"
-                }`}
-              >
-                {label}
-                {id === "next" && queue.length > index + 1
-                  ? ` (${queue.length - index - 1})`
-                  : id === "results" && results.length
-                    ? ` (${results.length})`
-                    : ""}
-              </button>
-            ))}
-          </div>
-
           {view === "results" && searching && <SkeletonRows />}
           {view === "results" && error && (
             <p className="py-8 text-center text-sm text-accent">{error}</p>
@@ -544,47 +637,115 @@ export default function YouTube() {
             </div>
           )}
 
-          {view === "listening" &&
-            (month || ytRecent.length ? (
-              <div>
-                {month && (
-                  <MonthSection
-                    month={month}
-                    onArtist={(name) => {
-                      setQuery(name);
-                      search(name);
-                    }}
-                  />
-                )}
-                {!!ytRecent.length && (
-                  <RecentStrip
-                    tracks={ytRecent}
-                    onPlay={(i) => playList(ytRecent, i)}
-                  />
-                )}
-                {!!top.length && (
-                  <section className="mt-3">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold uppercase tracking-widest text-label-3">
-                        Most played
+          {view === "home" &&
+            (picks?.tracks.length ? (
+              <>
+                <section
+                  className={`@container relative min-w-0 overflow-hidden rounded-sheet bg-elevated shadow-2xl shadow-black/40 ring-1 ring-white/10 ${
+                    track ? "lg:col-start-1 lg:row-start-2" : "col-span-full"
+                  }`}
+                >
+                  {picks.tracks[0].artwork && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={picks.tracks[0].artwork}
+                      alt=""
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 size-full scale-150 object-cover opacity-30 blur-3xl saturate-150"
+                    />
+                  )}
+                  <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
+                  <div className="relative flex h-full items-center gap-3.5 p-3 @lg:gap-5 @lg:p-[26px]">
+                    {/* 173px + 26px padding twice = 225px, the height of the 400px-wide video beside it. */}
+                    <Mosaic
+                      tracks={picks.tracks}
+                      className="size-20 shrink-0 rounded-control ring-1 ring-white/10 @lg:size-[173px] @lg:rounded-card"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-label-2 @lg:text-xxs">
+                        {picks.mine ? "For you" : "Popular now"}
+                      </p>
+                      <h2 className="mt-1 hidden text-3xl font-semibold tracking-tight @lg:block">
+                        {greeting()}
                       </h2>
-                      <div className="flex gap-2">
+                      <p className="mt-0.5 line-clamp-2 max-w-md text-xxs text-label-2 @lg:mt-1.5 @lg:text-[15px]">
+                        {picks.mine
+                          ? "The songs you keep coming back to, with more like them after."
+                          : "What's popular on YouTube right now. Your own picks show up here as you listen."}
+                      </p>
+                      <div className="mt-2.5 flex gap-2 @lg:mt-4">
                         <button
-                          onClick={() => playList(topTracks, 0)}
-                          className="flex h-8 items-center gap-1.5 rounded-control bg-accent px-3 text-xs font-semibold text-white transition hover:brightness-110 active:scale-[0.97]"
+                          onClick={() => playList(picks.tracks, 0)}
+                          className="flex h-9 items-center gap-1.5 rounded-control bg-accent px-4 text-xs font-semibold text-white transition hover:brightness-110 active:scale-[0.97]"
                         >
                           <TbPlayerPlayFilled size={12} />
                           Play
                         </button>
                         <button
-                          onClick={() => playList(shuffled(topTracks), 0)}
-                          className="flex h-8 items-center gap-1.5 rounded-control bg-fill px-3 text-xs font-medium text-label transition hover:bg-fill-2 active:scale-[0.97]"
+                          onClick={() => playList(shuffled(picks.tracks), 0)}
+                          className="flex h-9 items-center gap-1.5 rounded-control bg-fill px-4 text-xs font-medium text-label transition hover:bg-fill-2 active:scale-[0.97]"
                         >
                           <TbArrowsShuffle size={13} />
                           Shuffle
                         </button>
                       </div>
                     </div>
+                  </div>
+                </section>
+
+                <div className="@container col-span-full min-w-0">
+                <section className="mb-8">
+                  <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-label-3">
+                    Quick picks
+                  </h2>
+                  <ul className="grid grid-cols-1 gap-x-6 @2xl:grid-cols-2 @5xl:grid-cols-3">
+                    {picks.tracks.map((t) => (
+                      <Row
+                        key={t.id}
+                        track={t}
+                        active={t.id === track?.id}
+                        playing={t.id === track?.id && playing}
+                        onPlay={() =>
+                          t.id === track?.id ? toggle() : startRadio(t)
+                        }
+                        onAddTo={() => setAddTo(t)}
+                      />
+                    ))}
+                  </ul>
+                </section>
+
+                {!!similar?.tracks.length && (
+                  <RecentStrip
+                    title={`More like ${similar.seed.title}`}
+                    tracks={similar.tracks}
+                    onPlay={(i) => startRadio(similar.tracks[i])}
+                  />
+                )}
+
+                {!!ytRecent.length && (
+                  <RecentStrip
+                    tracks={ytRecent}
+                    onPlay={(i) => playList(ytRecent, i)}
+                  />
+                )}
+
+                {month && (
+                  <div className="mt-8">
+                    <MonthSection
+                      month={month}
+                      onArtist={(name) => {
+                        setQuery(name);
+                        search(name);
+                      }}
+                    />
+                  </div>
+                )}
+
+                {!!top.length && (
+                  <section>
+                    <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-label-3">
+                      Most played
+                    </h2>
                     <ul>
                       {top.map(({ track: t, n }, i) => (
                         <Row
@@ -602,18 +763,20 @@ export default function YouTube() {
                     </ul>
                   </section>
                 )}
-              </div>
+                </div>
+              </>
             ) : (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2.5 py-16 text-center">
+              <div className="col-span-full flex flex-1 flex-col items-center justify-center gap-2.5 py-16 text-center">
                 <TbBrandYoutube className="text-label-3" size={32} />
                 <p className="max-w-xs text-sm text-label-2">
-                  Your YouTube listening shows up here: this month&apos;s top
-                  artists, what you played last and what you play most.
+                  {hasKey
+                    ? "Search for a song to start. Your favourites gather here as you listen."
+                    : "Add a YouTube Data API key to .env.local as NEXT_PUBLIC_YT_KEY to search."}
                 </p>
               </div>
             ))}
 
-          {view !== "listening" && !(view === "results" && searching) && (
+          {view !== "home" && !(view === "results" && searching) && (
             <ul>
               {list.map((t, i) => {
                 const at = view === "results" ? -1 : index + i;

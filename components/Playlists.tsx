@@ -65,7 +65,7 @@ const hoursOf = (m: number) =>
 
 /** Four covers when there are four, otherwise the first one — the way a folder of
     albums reads at a glance without needing a title to identify it. */
-function Mosaic({
+export function Mosaic({
   tracks,
   className = "",
 }: {

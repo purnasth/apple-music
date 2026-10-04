@@ -12,6 +12,10 @@ export type Source = "youtube" | "library";
 export const sourceOf = (t: Track): Source => (isYouTube(t) ? "youtube" : "library");
 export const sourcesOf = (tracks: Track[]) => [...new Set(tracks.map(sourceOf))];
 
+/** How far a video of this aspect must zoom to fill a 16:9 frame with no bars. */
+export const cover = (aspect?: number) =>
+  aspect ? Math.max(aspect / (16 / 9), 16 / 9 / aspect) : 1;
+
 /** "PT1H2M3S" → 3723. */
 export const isoSecs = (iso: string) => {
   const m = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(iso);
@@ -35,7 +39,7 @@ type Snippet = {
   thumbnails: Record<string, { url: string } | undefined>;
 };
 
-const toTrack = (id: string, s: Snippet, secs?: number): Track => ({
+const toTrack = (id: string, s: Snippet, secs?: number, aspect?: number): Track => ({
   id: `yt:${id}`,
   title: unescape(s.title),
   artist: artistOf(unescape(s.channelTitle)),
@@ -44,6 +48,7 @@ const toTrack = (id: string, s: Snippet, secs?: number): Track => ({
   artworkLarge: (s.thumbnails.maxres ?? s.thumbnails.high)?.url,
   appleUrl: `https://www.youtube.com/watch?v=${id}`,
   duration: secs,
+  aspect,
 });
 
 async function api<T>(path: string, params: Record<string, string>) {
@@ -57,12 +62,40 @@ async function api<T>(path: string, params: Record<string, string>) {
 export async function videos(ids: string[]): Promise<Track[]> {
   if (!ids.length) return [];
   const data = await api<{
-    items: { id: string; snippet: Snippet; contentDetails: { duration: string } }[];
-  }>("videos", { part: "snippet,contentDetails", id: ids.slice(0, 50).join(",") });
+    items: {
+      id: string;
+      snippet: Snippet;
+      contentDetails: { duration: string };
+      player?: { embedWidth?: string; embedHeight?: string };
+    }[];
+  }>("videos", {
+    part: "snippet,contentDetails,player",
+    // Without a size the API leaves out the embed's dimensions, which carry the aspect.
+    maxWidth: "640",
+    id: ids.slice(0, 50).join(","),
+  });
   const byId = new Map(
-    data.items.map((v) => [v.id, toTrack(v.id, v.snippet, isoSecs(v.contentDetails.duration))]),
+    data.items.map((v) => {
+      const w = Number(v.player?.embedWidth);
+      const h = Number(v.player?.embedHeight);
+      const aspect = w && h ? w / h : undefined;
+      return [v.id, toTrack(v.id, v.snippet, isoSecs(v.contentDetails.duration), aspect)];
+    }),
   );
   return ids.map((id) => byId.get(id)).filter((t): t is Track => !!t);
+}
+
+/** Today's most popular music videos, for a listener with no history yet: 1 unit. */
+export async function musicChart(): Promise<Track[]> {
+  const region = navigator.language.split("-")[1];
+  const data = await api<{ items: { id: string }[] }>("videos", {
+    part: "id",
+    chart: "mostPopular",
+    videoCategoryId: "10",
+    maxResults: "25",
+    ...(region && { regionCode: region }),
+  });
+  return videos(data.items.map((i) => i.id));
 }
 
 /** Music videos for a query: 100 units, a hundredth of the free daily quota. */

@@ -19,6 +19,8 @@ export type Track = {
   lyrics?: string;
   /** Word timings from `pnpm words`. */
   words?: string;
+  /** A YouTube video's width over its height. */
+  aspect?: number;
 };
 
 /* ---------- Deezer search (public API, no key) ----------
