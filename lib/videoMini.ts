@@ -174,7 +174,7 @@ export function createVideoMini(
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, W, H);
     if (hasArt) {
-      // A still of the .flow backdrop: the cover blown up and blurred.
+      // A still of the Backdrop: the cover blown up and blurred.
       ctx.save();
       ctx.filter = "blur(24px) saturate(1.8)";
       ctx.drawImage(art, -W * 0.15, -W * 0.45, W * 1.3, W * 1.3);

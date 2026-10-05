@@ -1,6 +1,6 @@
 "use client";
 
-import { RefObject, useEffect, useRef, useState } from "react";
+import { CSSProperties, RefObject, useEffect, useId, useRef, useState } from "react";
 import {
   TbArrowsShuffle,
   TbBrandYoutube,
@@ -17,7 +17,9 @@ import {
 } from "react-icons/tb";
 import { Masthead, TabBar } from "@/components/AppNav";
 import { PlayerBar } from "@/components/Player";
-import { Btn } from "@/components/PlayerKit";
+import { Backdrop, Btn, useArtTone } from "@/components/PlayerKit";
+import { backdropDim } from "@/lib/tone";
+import { loopPath, waveHeights, waveStops } from "@/lib/wave";
 import { ClearButton, RecentStrip, Row, SkeletonRows } from "@/components/Row";
 import { AddToSheet, MonthSection, Mosaic } from "@/components/Playlists";
 import LyricsPanel from "@/components/Lyrics";
@@ -40,10 +42,13 @@ import {
 import {
   aboutVideo,
   cover,
+  getResume,
   getYtSession,
   hasKey,
   isYouTube,
   musicChart,
+  resumeAt,
+  saveResume,
   saveYtSession,
   songOf,
   searchYouTube,
@@ -52,8 +57,8 @@ import {
 } from "@/lib/youtube";
 
 type YTPlayer = {
-  loadVideoById(id: string): void;
-  cueVideoById(id: string): void;
+  loadVideoById(id: string, startSeconds?: number): void;
+  cueVideoById(id: string, startSeconds?: number): void;
   cuePlaylist(o: { list: string; listType: string }): void;
   getPlaylist(): string[] | null;
   playVideo(): void;
@@ -167,7 +172,7 @@ export default function YouTube() {
   // Set once the player reports ready: before that its methods don't exist yet.
   const player = useRef<YTPlayer | null>(null);
   // A pick made while the player was still loading, played the moment it's ready.
-  const pending = useRef<string | null>(null);
+  const pending = useRef<Track | null>(null);
   const state = useRef(-1);
   // A second, never-playing player reads Mixes, so the one playing is never interrupted.
   const scoutHost = useRef<HTMLDivElement>(null);
@@ -182,6 +187,7 @@ export default function YouTube() {
   const more = useRef<HTMLDivElement>(null);
   const unshuffled = useRef<Track[] | null>(null);
   const lastTime = useRef(0);
+  const [resume, setResume] = useState<Record<string, number>>({});
   // YouTube flashes its own title and controls on every state change; see VEIL_MS.
   const [veiled, setVeiled] = useState(true);
   const unveil = useRef(0);
@@ -189,14 +195,16 @@ export default function YouTube() {
   const live = useRef({ queue, index, repeatOne, onEnded: () => {} });
 
   const track = queue[index];
+  const art = track?.artworkLarge ?? track?.artwork;
+  const { lum, hue } = useArtTone(art);
 
   function play(i: number, q = queue) {
     const t = q[i];
     if (!t) return;
     setIndex(i);
     lastTime.current = 0;
-    if (player.current) player.current.loadVideoById(videoId(t));
-    else pending.current = videoId(t);
+    if (player.current) player.current.loadVideoById(videoId(t), resumeAt(t));
+    else pending.current = t;
     setRecent(pushRecent(t));
     // Browsers let sound start only shortly after a tap; a player that took
     // longer to load is refused, and waits at 0:00 for another one.
@@ -361,6 +369,7 @@ export default function YouTube() {
     setPlaylists(getPlaylists());
     setRecent(getRecent());
     setPlays(getPlays());
+    setResume(getResume());
     try {
       setTheater(!!localStorage.getItem("yt-theater"));
     } catch {}
@@ -381,15 +390,17 @@ export default function YouTube() {
         events: {
           onReady: () => {
             player.current = p;
-            if (pending.current) return p.loadVideoById(pending.current);
+            const want = pending.current;
+            if (want) return p.loadVideoById(videoId(want), resumeAt(want));
             if (!s) return;
             setQueue(s.queue);
             setIndex(s.index);
             const t = s.queue[s.index];
+            const at = resumeAt(t);
             if (s.play) {
               setRecent(pushRecent(t));
-              p.loadVideoById(videoId(t));
-            } else p.cueVideoById(videoId(t));
+              p.loadVideoById(videoId(t), at);
+            } else p.cueVideoById(videoId(t), at);
           },
           onStateChange: ({ data }) => {
             setVeiled(true);
@@ -464,11 +475,21 @@ export default function YouTube() {
   // The iframe has no time events, so the clock is polled.
   useEffect(() => {
     if (!playing || !track) return;
+    // Kept from the last tick: on a skip, the player already reports the next video.
+    let at = 0;
+    let len = 0;
+    let saved = 0;
     const id = setInterval(() => {
       const p = player.current;
       if (!p) return;
       const t = p.getCurrentTime();
       const d = p.getDuration();
+      at = t;
+      len = d;
+      if (d && Math.abs(t - saved) >= 5) {
+        saved = t;
+        setResume(saveResume(track, t, d));
+      }
       setTime(t);
       setDur(d);
       setBuffered(p.getVideoLoadedFraction() * d);
@@ -478,7 +499,10 @@ export default function YouTube() {
       lastTime.current = t;
       if (was < mark && t >= mark && t - was < 2) setPlays(recordPlay(track));
     }, 500);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      if (len) setResume(saveResume(track, at, len));
+    };
   }, [playing, track]);
 
   useEffect(() => {
@@ -643,10 +667,17 @@ export default function YouTube() {
   const top = mostPlayed(ytPlays);
   const topTracks = top.map((x) => x.track);
   const ytRecent = recent.filter(isYouTube);
+  const heard = (t: Track) =>
+    resume[t.id] && t.duration ? resume[t.id] / t.duration : undefined;
 
   return (
-    <div className="flex min-h-dvh flex-col bg-canvas pb-40 text-label sm:pb-28">
-      <Masthead current="youtube">
+    <div className="isolate flex min-h-dvh flex-col bg-canvas pb-40 text-label sm:pb-28">
+      {view !== "results" && track && (
+        <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+          <Backdrop art={art} playing={playing} dim={Math.min(backdropDim(lum) + 0.2, 0.85)} />
+        </div>
+      )}
+      <Masthead current="youtube" clear={view !== "results" && !!track}>
         <form onSubmit={onSearch}>
           <TbSearch
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-label-3"
@@ -755,6 +786,11 @@ export default function YouTube() {
               />
             )}
           </div>
+          {view === "next" && track && (
+            <div className="relative mt-2 h-8">
+              <Pulse key={track.id} seed={track.id} playing={playing} hue={hue} clock={clock} />
+            </div>
+          )}
           {view === "next" && !theater && track && (
             <NowPlaying
               key={track.id}
@@ -798,7 +834,7 @@ export default function YouTube() {
             (picks?.tracks.length ? (
               <>
                 <section
-                  className={`@container relative min-w-0 overflow-hidden rounded-sheet bg-elevated shadow-2xl shadow-black/40 ring-1 ring-white/10 ${
+                  className={`@container relative min-w-0 overflow-hidden rounded-sheet bg-white/5 shadow-2xl shadow-black/40 ring-1 ring-white/10 ${
                     track ? "lg:col-start-1 lg:row-start-2" : "col-span-full"
                   }`}
                 >
@@ -862,6 +898,7 @@ export default function YouTube() {
                         track={t}
                         active={t.id === track?.id}
                         playing={t.id === track?.id && playing}
+                        heard={heard(t)}
                         onPlay={() =>
                           t.id === track?.id ? toggle() : startRadio(t)
                         }
@@ -876,6 +913,7 @@ export default function YouTube() {
                     title={`More like ${similar.seed.title}`}
                     tracks={similar.tracks}
                     onPlay={(i) => startRadio(similar.tracks[i])}
+                    heard={heard}
                   />
                 )}
 
@@ -883,6 +921,7 @@ export default function YouTube() {
                   <RecentStrip
                     tracks={ytRecent}
                     onPlay={(i) => playList(ytRecent, i)}
+                    heard={heard}
                   />
                 )}
 
@@ -910,6 +949,7 @@ export default function YouTube() {
                           track={t}
                           active={t.id === track?.id}
                           playing={t.id === track?.id && playing}
+                          heard={heard(t)}
                           onPlay={() =>
                             t.id === track?.id ? toggle() : playList(topTracks, i)
                           }
@@ -944,6 +984,7 @@ export default function YouTube() {
                     track={t}
                     active={now}
                     playing={now && playing}
+                    heard={heard(t)}
                     onPlay={() => {
                       if (now) return toggle();
                       if (at >= 0) return play(at);
@@ -1050,6 +1091,100 @@ export default function YouTube() {
   );
 }
 
+/** New wave shapes per second of the song. */
+const BEAT = 3;
+
+/** Seeded heights spread from near flat to full, so short loops read as short. */
+const shape = (seed: string, n: number) =>
+  waveHeights(seed, n).map((h) => 0.05 + 0.95 * ((h - 0.3) / 0.7) ** 2.2);
+
+/** Up next's wave: loops that rise and fall in place, shaped by the playhead, so a seek reshapes it. */
+function Pulse({
+  seed,
+  playing,
+  hue,
+  clock,
+}: {
+  seed: string;
+  playing: boolean;
+  hue: number | null;
+  clock: RefObject<HTMLAudioElement>;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const grad = useId();
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = box.current!;
+    const ro = new ResizeObserver(() => setW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const H = 24;
+  const step = 5;
+  const n = Math.floor(w / step / 2) * 2;
+
+  useEffect(() => {
+    const path = box.current?.querySelector("path");
+    if (!path || !n) return;
+    const shown = shape(seed, n);
+    path.setAttribute("d", loopPath(shown, step, H));
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // The player's time moves in coarse steps; a local clock keeps the motion smooth.
+    let t = clock.current.currentTime;
+    let beat = NaN;
+    let target = shown;
+    let last = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      const real = clock.current.currentTime;
+      if (playing) t += dt;
+      if (!playing || Math.abs(real - t) > 0.3) t = real;
+      const k = Math.floor(t * BEAT);
+      if (k !== beat) target = shape(`${seed}:${(beat = k)}`, n);
+      const ease = 1 - Math.exp(-dt / 0.12);
+      let moved = false;
+      for (let i = 0; i < n; i++) {
+        const d = target[i] - shown[i];
+        if (Math.abs(d) > 0.002) moved = true;
+        shown[i] += d * ease;
+      }
+      if (moved) path.setAttribute("d", loopPath(shown, step, H));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [seed, playing, n, clock]);
+
+  const stops = waveStops(hue);
+  return (
+    <div
+      ref={box}
+      aria-hidden
+      data-playing={playing || undefined}
+      data-reactive=""
+      className="horizon pointer-events-none absolute inset-0"
+      style={{ "--glow": stops[1], "--k": 1, "--pad": "4px" } as CSSProperties}
+    >
+      <div className="horizon-band" style={{ height: H + 8 }}>
+        <div className="horizon-line">
+          <svg width={n * step} height={H} className="mx-auto block">
+            <defs>
+              <linearGradient id={grad} gradientUnits="userSpaceOnUse" x1="0" y1={H} x2="0" y2="0">
+                {stops.map((c, i) => (
+                  <stop key={i} offset={i / 2} stopColor={c} />
+                ))}
+              </linearGradient>
+            </defs>
+            <path style={{ stroke: `url(#${CSS.escape(grad)})` }} />
+          </svg>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Under the video on Up next: what's playing, and its lyrics or, failing those, its description. */
 function NowPlaying({
   track,
@@ -1098,7 +1233,7 @@ function NowPlaying({
   };
 
   return (
-    <div className="mt-4 hidden lg:block">
+    <div className="mt-2 hidden lg:block">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h2 className="line-clamp-2 text-lg font-semibold tracking-tight">
