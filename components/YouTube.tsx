@@ -1,6 +1,6 @@
 "use client";
 
-import { RefObject, useEffect, useRef, useState } from "react";
+import { CSSProperties, RefObject, useEffect, useId, useRef, useState } from "react";
 import {
   TbArrowsShuffle,
   TbBrandYoutube,
@@ -17,7 +17,9 @@ import {
 } from "react-icons/tb";
 import { Masthead, TabBar } from "@/components/AppNav";
 import { PlayerBar } from "@/components/Player";
-import { Btn } from "@/components/PlayerKit";
+import { Backdrop, Btn, useArtTone } from "@/components/PlayerKit";
+import { backdropDim } from "@/lib/tone";
+import { loopPath, waveHeights, waveStops } from "@/lib/wave";
 import { ClearButton, RecentStrip, Row, SkeletonRows } from "@/components/Row";
 import { AddToSheet, MonthSection, Mosaic } from "@/components/Playlists";
 import LyricsPanel from "@/components/Lyrics";
@@ -189,6 +191,8 @@ export default function YouTube() {
   const live = useRef({ queue, index, repeatOne, onEnded: () => {} });
 
   const track = queue[index];
+  const art = track?.artworkLarge ?? track?.artwork;
+  const { lum, hue } = useArtTone(art);
 
   function play(i: number, q = queue) {
     const t = q[i];
@@ -645,8 +649,13 @@ export default function YouTube() {
   const ytRecent = recent.filter(isYouTube);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-canvas pb-40 text-label sm:pb-28">
-      <Masthead current="youtube">
+    <div className="isolate flex min-h-dvh flex-col bg-canvas pb-40 text-label sm:pb-28">
+      {view === "next" && track && (
+        <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+          <Backdrop art={art} playing={playing} dim={Math.min(backdropDim(lum) + 0.2, 0.85)} />
+        </div>
+      )}
+      <Masthead current="youtube" clear={view === "next" && !!track}>
         <form onSubmit={onSearch}>
           <TbSearch
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-label-3"
@@ -755,6 +764,11 @@ export default function YouTube() {
               />
             )}
           </div>
+          {view === "next" && track && (
+            <div className="relative mt-2 h-8">
+              <Pulse key={track.id} seed={track.id} playing={playing} hue={hue} clock={clock} />
+            </div>
+          )}
           {view === "next" && !theater && track && (
             <NowPlaying
               key={track.id}
@@ -1050,6 +1064,100 @@ export default function YouTube() {
   );
 }
 
+/** New wave shapes per second of the song. */
+const BEAT = 3;
+
+/** Seeded heights spread from near flat to full, so short loops read as short. */
+const shape = (seed: string, n: number) =>
+  waveHeights(seed, n).map((h) => 0.05 + 0.95 * ((h - 0.3) / 0.7) ** 2.2);
+
+/** Up next's wave: loops that rise and fall in place, shaped by the playhead, so a seek reshapes it. */
+function Pulse({
+  seed,
+  playing,
+  hue,
+  clock,
+}: {
+  seed: string;
+  playing: boolean;
+  hue: number | null;
+  clock: RefObject<HTMLAudioElement>;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const grad = useId();
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = box.current!;
+    const ro = new ResizeObserver(() => setW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const H = 24;
+  const step = 5;
+  const n = Math.floor(w / step / 2) * 2;
+
+  useEffect(() => {
+    const path = box.current?.querySelector("path");
+    if (!path || !n) return;
+    const shown = shape(seed, n);
+    path.setAttribute("d", loopPath(shown, step, H));
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // The player's time moves in coarse steps; a local clock keeps the motion smooth.
+    let t = clock.current.currentTime;
+    let beat = NaN;
+    let target = shown;
+    let last = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      const real = clock.current.currentTime;
+      if (playing) t += dt;
+      if (!playing || Math.abs(real - t) > 0.3) t = real;
+      const k = Math.floor(t * BEAT);
+      if (k !== beat) target = shape(`${seed}:${(beat = k)}`, n);
+      const ease = 1 - Math.exp(-dt / 0.12);
+      let moved = false;
+      for (let i = 0; i < n; i++) {
+        const d = target[i] - shown[i];
+        if (Math.abs(d) > 0.002) moved = true;
+        shown[i] += d * ease;
+      }
+      if (moved) path.setAttribute("d", loopPath(shown, step, H));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [seed, playing, n, clock]);
+
+  const stops = waveStops(hue);
+  return (
+    <div
+      ref={box}
+      aria-hidden
+      data-playing={playing || undefined}
+      data-reactive=""
+      className="horizon pointer-events-none absolute inset-0"
+      style={{ "--glow": stops[1], "--k": 1, "--pad": "4px" } as CSSProperties}
+    >
+      <div className="horizon-band" style={{ height: H + 8 }}>
+        <div className="horizon-line">
+          <svg width={n * step} height={H} className="mx-auto block">
+            <defs>
+              <linearGradient id={grad} gradientUnits="userSpaceOnUse" x1="0" y1={H} x2="0" y2="0">
+                {stops.map((c, i) => (
+                  <stop key={i} offset={i / 2} stopColor={c} />
+                ))}
+              </linearGradient>
+            </defs>
+            <path style={{ stroke: `url(#${CSS.escape(grad)})` }} />
+          </svg>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Under the video on Up next: what's playing, and its lyrics or, failing those, its description. */
 function NowPlaying({
   track,
@@ -1098,7 +1206,7 @@ function NowPlaying({
   };
 
   return (
-    <div className="mt-4 hidden lg:block">
+    <div className="mt-2 hidden lg:block">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h2 className="line-clamp-2 text-lg font-semibold tracking-tight">

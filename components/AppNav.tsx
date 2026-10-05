@@ -65,11 +65,14 @@ export function Masthead({
   current,
   onTab,
   libraryCount,
+  clear,
   children,
 }: {
   current: Place;
   onTab?: (t: Tab) => void;
   libraryCount?: number;
+  /** Over a backdrop: no glass until content scrolls under the bar. */
+  clear?: boolean;
   children: React.ReactNode;
 }) {
   const [scrolled, setScrolled] = useState(false);
@@ -84,8 +87,8 @@ export function Masthead({
 
   return (
     <header
-      className={`glass sticky top-0 z-30 border-b transition-colors ${
-        scrolled ? "border-separator" : "border-transparent"
+      className={`sticky top-0 z-30 border-b transition-colors ${
+        scrolled ? "glass border-separator" : `border-transparent ${clear ? "" : "glass"}`
       }`}
     >
       <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
