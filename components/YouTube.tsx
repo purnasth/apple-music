@@ -650,12 +650,12 @@ export default function YouTube() {
 
   return (
     <div className="isolate flex min-h-dvh flex-col bg-canvas pb-40 text-label sm:pb-28">
-      {view === "next" && track && (
+      {view !== "results" && track && (
         <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
           <Backdrop art={art} playing={playing} dim={Math.min(backdropDim(lum) + 0.2, 0.85)} />
         </div>
       )}
-      <Masthead current="youtube" clear={view === "next" && !!track}>
+      <Masthead current="youtube" clear={view !== "results" && !!track}>
         <form onSubmit={onSearch}>
           <TbSearch
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-label-3"
@@ -812,7 +812,7 @@ export default function YouTube() {
             (picks?.tracks.length ? (
               <>
                 <section
-                  className={`@container relative min-w-0 overflow-hidden rounded-sheet bg-elevated shadow-2xl shadow-black/40 ring-1 ring-white/10 ${
+                  className={`@container relative min-w-0 overflow-hidden rounded-sheet bg-white/5 shadow-2xl shadow-black/40 ring-1 ring-white/10 ${
                     track ? "lg:col-start-1 lg:row-start-2" : "col-span-full"
                   }`}
                 >
