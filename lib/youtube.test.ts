@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { artistOf, cover, isoSecs, songOf } from "./youtube.ts";
+import { artistOf, cover, isoSecs, resumeAt, saveResume, songOf } from "./youtube.ts";
 
 test("isoSecs reads YouTube durations", () => {
   assert.equal(isoSecs("PT3M45S"), 225);
@@ -33,4 +33,22 @@ test("songOf finds the song inside a video title", () => {
   assert.deepEqual(pick(t("Sajjan Raj Vaidya - Pahaar [Official Release]", "Sajjan")), ["Sajjan Raj Vaidya", "Pahaar"]);
   assert.deepEqual(pick(t("Pahaar", "Sajjan Raj Vaidya")), ["Sajjan Raj Vaidya", "Pahaar"]);
   assert.deepEqual(pick(t("Kesariya (Lyrics) | Brahmastra", "7clouds")), ["7clouds", "Kesariya"]);
+});
+
+test("saveResume keeps how far each video got; resumeAt picks up only partway", () => {
+  const store = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    },
+  });
+  const song = { id: "yt:song", duration: 225 } as Parameters<typeof saveResume>[0];
+  assert.deepEqual(saveResume(song, 100.6, 225), { "yt:song": 100 });
+  assert.equal(resumeAt(song), 100);
+  assert.deepEqual(saveResume(song, 224.5, 225), { "yt:song": 224 });
+  assert.equal(resumeAt(song), undefined);
+  assert.deepEqual(saveResume(song, 5, 225), {});
+  assert.equal(resumeAt(song), undefined);
 });

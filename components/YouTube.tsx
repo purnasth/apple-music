@@ -42,10 +42,13 @@ import {
 import {
   aboutVideo,
   cover,
+  getResume,
   getYtSession,
   hasKey,
   isYouTube,
   musicChart,
+  resumeAt,
+  saveResume,
   saveYtSession,
   songOf,
   searchYouTube,
@@ -54,8 +57,8 @@ import {
 } from "@/lib/youtube";
 
 type YTPlayer = {
-  loadVideoById(id: string): void;
-  cueVideoById(id: string): void;
+  loadVideoById(id: string, startSeconds?: number): void;
+  cueVideoById(id: string, startSeconds?: number): void;
   cuePlaylist(o: { list: string; listType: string }): void;
   getPlaylist(): string[] | null;
   playVideo(): void;
@@ -169,7 +172,7 @@ export default function YouTube() {
   // Set once the player reports ready: before that its methods don't exist yet.
   const player = useRef<YTPlayer | null>(null);
   // A pick made while the player was still loading, played the moment it's ready.
-  const pending = useRef<string | null>(null);
+  const pending = useRef<Track | null>(null);
   const state = useRef(-1);
   // A second, never-playing player reads Mixes, so the one playing is never interrupted.
   const scoutHost = useRef<HTMLDivElement>(null);
@@ -184,6 +187,7 @@ export default function YouTube() {
   const more = useRef<HTMLDivElement>(null);
   const unshuffled = useRef<Track[] | null>(null);
   const lastTime = useRef(0);
+  const [resume, setResume] = useState<Record<string, number>>({});
   // YouTube flashes its own title and controls on every state change; see VEIL_MS.
   const [veiled, setVeiled] = useState(true);
   const unveil = useRef(0);
@@ -199,8 +203,8 @@ export default function YouTube() {
     if (!t) return;
     setIndex(i);
     lastTime.current = 0;
-    if (player.current) player.current.loadVideoById(videoId(t));
-    else pending.current = videoId(t);
+    if (player.current) player.current.loadVideoById(videoId(t), resumeAt(t));
+    else pending.current = t;
     setRecent(pushRecent(t));
     // Browsers let sound start only shortly after a tap; a player that took
     // longer to load is refused, and waits at 0:00 for another one.
@@ -365,6 +369,7 @@ export default function YouTube() {
     setPlaylists(getPlaylists());
     setRecent(getRecent());
     setPlays(getPlays());
+    setResume(getResume());
     try {
       setTheater(!!localStorage.getItem("yt-theater"));
     } catch {}
@@ -385,15 +390,17 @@ export default function YouTube() {
         events: {
           onReady: () => {
             player.current = p;
-            if (pending.current) return p.loadVideoById(pending.current);
+            const want = pending.current;
+            if (want) return p.loadVideoById(videoId(want), resumeAt(want));
             if (!s) return;
             setQueue(s.queue);
             setIndex(s.index);
             const t = s.queue[s.index];
+            const at = resumeAt(t);
             if (s.play) {
               setRecent(pushRecent(t));
-              p.loadVideoById(videoId(t));
-            } else p.cueVideoById(videoId(t));
+              p.loadVideoById(videoId(t), at);
+            } else p.cueVideoById(videoId(t), at);
           },
           onStateChange: ({ data }) => {
             setVeiled(true);
@@ -468,11 +475,21 @@ export default function YouTube() {
   // The iframe has no time events, so the clock is polled.
   useEffect(() => {
     if (!playing || !track) return;
+    // Kept from the last tick: on a skip, the player already reports the next video.
+    let at = 0;
+    let len = 0;
+    let saved = 0;
     const id = setInterval(() => {
       const p = player.current;
       if (!p) return;
       const t = p.getCurrentTime();
       const d = p.getDuration();
+      at = t;
+      len = d;
+      if (d && Math.abs(t - saved) >= 5) {
+        saved = t;
+        setResume(saveResume(track, t, d));
+      }
       setTime(t);
       setDur(d);
       setBuffered(p.getVideoLoadedFraction() * d);
@@ -482,7 +499,10 @@ export default function YouTube() {
       lastTime.current = t;
       if (was < mark && t >= mark && t - was < 2) setPlays(recordPlay(track));
     }, 500);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      if (len) setResume(saveResume(track, at, len));
+    };
   }, [playing, track]);
 
   useEffect(() => {
@@ -647,6 +667,8 @@ export default function YouTube() {
   const top = mostPlayed(ytPlays);
   const topTracks = top.map((x) => x.track);
   const ytRecent = recent.filter(isYouTube);
+  const heard = (t: Track) =>
+    resume[t.id] && t.duration ? resume[t.id] / t.duration : undefined;
 
   return (
     <div className="isolate flex min-h-dvh flex-col bg-canvas pb-40 text-label sm:pb-28">
@@ -876,6 +898,7 @@ export default function YouTube() {
                         track={t}
                         active={t.id === track?.id}
                         playing={t.id === track?.id && playing}
+                        heard={heard(t)}
                         onPlay={() =>
                           t.id === track?.id ? toggle() : startRadio(t)
                         }
@@ -890,6 +913,7 @@ export default function YouTube() {
                     title={`More like ${similar.seed.title}`}
                     tracks={similar.tracks}
                     onPlay={(i) => startRadio(similar.tracks[i])}
+                    heard={heard}
                   />
                 )}
 
@@ -897,6 +921,7 @@ export default function YouTube() {
                   <RecentStrip
                     tracks={ytRecent}
                     onPlay={(i) => playList(ytRecent, i)}
+                    heard={heard}
                   />
                 )}
 
@@ -924,6 +949,7 @@ export default function YouTube() {
                           track={t}
                           active={t.id === track?.id}
                           playing={t.id === track?.id && playing}
+                          heard={heard(t)}
                           onPlay={() =>
                             t.id === track?.id ? toggle() : playList(topTracks, i)
                           }
@@ -958,6 +984,7 @@ export default function YouTube() {
                     track={t}
                     active={now}
                     playing={now && playing}
+                    heard={heard(t)}
                     onPlay={() => {
                       if (now) return toggle();
                       if (at >= 0) return play(at);

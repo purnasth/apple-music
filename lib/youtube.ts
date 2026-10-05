@@ -156,3 +156,30 @@ export function getYtSession(): YtSession | null {
 
 export const saveYtSession = (s: YtSession) =>
   localStorage.setItem(KEY_SESSION, JSON.stringify(s));
+
+/* How far each video got, so its row shows it and a half-heard one picks up there. */
+const KEY_RESUME = "yt-resume";
+
+/** Seconds into each video, by track id, where listening last stopped. */
+export function getResume(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(KEY_RESUME) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+/** Notes where `t` stopped; barely started ones are forgotten. */
+export function saveResume(t: Track, at: number, dur: number) {
+  const r = getResume();
+  if (at / dur >= 0.05) r[t.id] = Math.floor(at);
+  else delete r[t.id];
+  localStorage.setItem(KEY_RESUME, JSON.stringify(r));
+  return r;
+}
+
+/** Where `t` starts: where it stopped partway, or the top once it was heard nearly through. */
+export function resumeAt(t: Track) {
+  const at = getResume()[t.id];
+  return at && (!t.duration || at / t.duration < 0.9) ? at : undefined;
+}

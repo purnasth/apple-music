@@ -82,6 +82,7 @@ export function Row({
   note,
   plays,
   mark,
+  heard,
 }: {
   track: Track;
   active: boolean;
@@ -94,6 +95,8 @@ export function Row({
   plays?: number;
   /** Tag YouTube songs: set on the main page, where they sit among the library's. */
   mark?: boolean;
+  /** How much of it was heard before stopping partway, 0–1: a bar along the artwork's bottom edge. */
+  heard?: number;
 }) {
   return (
     <li className="group relative flex items-center gap-3 rounded-control px-1 py-1 transition hover:bg-fill">
@@ -103,7 +106,7 @@ export function Row({
       <button
         onClick={onPlay}
         aria-label={playing ? "Pause" : "Play"}
-        className="relative shrink-0"
+        className="relative flex shrink-0"
       >
         {track.artwork ? (
           <img
@@ -130,6 +133,7 @@ export function Row({
             <TbPlayerPlayFilled size={15} />
           )}
         </span>
+        {heard !== undefined && <HeardBar heard={heard} className="rounded-[7px]" />}
         {mark && isYouTube(track) && (
           <YouTubeMark small className="-bottom-1 -right-1" />
         )}
@@ -219,18 +223,35 @@ export function Row({
   );
 }
 
+/** How far a song got, as a bar along its cover's bottom edge, clipped to its corners. */
+function HeardBar({ heard, className }: { heard: number; className: string }) {
+  return (
+    <span className={`pointer-events-none absolute inset-0 overflow-hidden ${className}`}>
+      <span className="absolute inset-x-0 bottom-0 h-[2px] bg-white/35">
+        <span
+          className="block h-full bg-accent"
+          style={{ width: `${Math.min(heard, 1) * 100}%` }}
+        />
+      </span>
+    </span>
+  );
+}
+
 /** A shelf of covers: the last songs heard, unless `title` says otherwise. */
 export function RecentStrip({
   tracks,
   onPlay,
   title = "Recently played",
   mark,
+  heard,
 }: {
   tracks: Track[];
   onPlay: (i: number) => void;
   title?: string;
   /** Tag YouTube songs, as Row's `mark` does. */
   mark?: boolean;
+  /** How much of each was heard, as Row's `heard`. */
+  heard?: (t: Track) => number | undefined;
 }) {
   return (
     <section className="mb-5">
@@ -245,7 +266,7 @@ export function RecentStrip({
             title={`${t.title} — ${t.artist}`}
             className="w-24 shrink-0 text-left transition hover:opacity-80"
           >
-            <span className="relative block">
+            <span className="relative flex">
               {t.artwork ? (
                 <img
                   src={t.artwork}
@@ -257,6 +278,9 @@ export function RecentStrip({
                 <div className="grid h-24 w-24 place-items-center rounded-[10px] bg-fill text-label-3">
                   <TbMusic size={24} />
                 </div>
+              )}
+              {heard?.(t) !== undefined && (
+                <HeardBar heard={heard(t)!} className="rounded-[10px]" />
               )}
               {mark && isYouTube(t) && <YouTubeMark className="-bottom-2 -right-2" />}
             </span>
