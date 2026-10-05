@@ -1,4 +1,5 @@
 import { createStore, set, get, del, values, type UseStore } from 'idb-keyval';
+import type { Source } from './youtube';
 
 export type Track = {
   id: string;
@@ -18,6 +19,10 @@ export type Track = {
   lyrics?: string;
   /** Word timings from `pnpm words`. */
   words?: string;
+  /** A YouTube video's width over its height. */
+  aspect?: number;
+  /** The YouTube channel that uploaded it. */
+  channel?: string;
 };
 
 /* ---------- Deezer search (public API, no key) ----------
@@ -156,7 +161,8 @@ const localTrack = (r: MetaRecord): Track => ({
 });
 
 /** 30s clips come from the catalogue; bundled and imported files are whole tracks. */
-export const isPreview = (t: Track) => !t.local && !t.id.startsWith('file:');
+export const isPreview = (t: Track) =>
+  !t.local && !t.id.startsWith('file:') && !t.id.startsWith('yt:');
 
 /** The library shipped with the site (public/songs.json), audio hosted on R2. */
 async function bundled(): Promise<Track[]> {
@@ -269,11 +275,18 @@ export function getRecent(): Track[] {
   }
 }
 
-/** Move the track to the head, keep the last 20, and hand back the new list. */
+/** The newest `n` of each source, in order, so a YouTube station can't push the library out. */
+export function keepRecent(list: Track[], n = 20): Track[] {
+  let yt = 0;
+  let lib = 0;
+  return list.filter((t) => (t.id.startsWith('yt:') ? ++yt : ++lib) <= n);
+}
+
+/** Move the track to the head, keep the last 20 of each source, and hand back the new list. */
 export function pushRecent(t: Track): Track[] {
   // Object URLs for local artwork are per-session, so drop them before persisting.
   const head = t.local ? { ...t, artwork: undefined } : t;
-  const list = [head, ...getRecent().filter((x) => x.id !== t.id)].slice(0, 20);
+  const list = keepRecent([head, ...getRecent().filter((x) => x.id !== t.id)]);
   localStorage.setItem(RECENT_KEY, JSON.stringify(list));
   return list;
 }
@@ -321,19 +334,56 @@ export function mostPlayed(plays: Plays, since = 0, limit = 25) {
     .slice(0, limit);
 }
 
+/** This month's listening, for the head of a page. */
+export type Month = {
+  label: string;
+  plays: number;
+  minutes: number;
+  artists: { name: string; n: number; art?: string; sources: Source[] }[];
+};
+
+/** Plays, minutes and top artists since the month began; null before the first play. */
+export function monthStats(plays: Plays, now = new Date()): Month | null {
+  const since = monthStart(now);
+  const month = mostPlayed(plays, since, Infinity);
+  if (!month.length) return null;
+  return {
+    label: now.toLocaleString(undefined, { month: 'long' }),
+    plays: month.reduce((n, x) => n + x.n, 0),
+    minutes: Math.round(month.reduce((m, x) => m + x.n * (x.track.duration ?? 0), 0) / 60),
+    artists: topArtists(plays, since),
+  };
+}
+
 /**
  * Artists by plays since a moment. A collaboration counts for each credited
  * artist; the cover is that of their most played song, the spelling the one
- * credited most often.
+ * credited most often. Artists heard only together, on exactly the same songs,
+ * are one entry ("Aashir Wajahat & gini") until one is heard without the other.
  */
 export function topArtists(plays: Plays, since = 0, limit = 8) {
-  type Acc = { n: number; spellings: Map<string, number>; art?: string; best: number };
+  type Acc = {
+    n: number;
+    spellings: Map<string, number>;
+    art?: string;
+    best: number;
+    sources: Set<Source>;
+    songs: Set<string>;
+  };
   const by = new Map<string, Acc>();
   for (const { track, n } of mostPlayed(plays, since, Infinity))
     for (const name of artistsOf(track.artist)) {
       const key = name.toLowerCase();
-      const a: Acc = by.get(key) ?? { n: 0, spellings: new Map(), best: 0 };
+      const a: Acc = by.get(key) ?? {
+        n: 0,
+        spellings: new Map(),
+        best: 0,
+        sources: new Set(),
+        songs: new Set(),
+      };
       a.n += n;
+      a.songs.add(track.id);
+      a.sources.add(track.id.startsWith('yt:') ? 'youtube' : 'library');
       a.spellings.set(name, (a.spellings.get(name) ?? 0) + n);
       if (n > a.best) {
         a.best = n;
@@ -341,11 +391,20 @@ export function topArtists(plays: Plays, since = 0, limit = 8) {
       }
       by.set(key, a);
     }
-  return [...by.values()]
-    .map((a) => ({
-      name: [...a.spellings].sort((x, y) => y[1] - x[1])[0][0],
+  const groups = new Map<string, { names: string[]; a: Acc }>();
+  for (const a of by.values()) {
+    const name = [...a.spellings].sort((x, y) => y[1] - x[1])[0][0];
+    const same = [...a.songs].sort().join('\n');
+    const g = groups.get(same);
+    if (g) g.names.push(name);
+    else groups.set(same, { names: [name], a });
+  }
+  return [...groups.values()]
+    .map(({ names, a }) => ({
+      name: names.join(' & '),
       n: a.n,
       art: a.art,
+      sources: [...a.sources],
     }))
     .sort((a, b) => b.n - a.n)
     .slice(0, limit);
