@@ -61,6 +61,8 @@ import {
   videos,
 } from "@/lib/youtube";
 
+type Picks = { tracks: Track[]; from: "youtube" | "mine" | "chart" };
+
 type YTPlayer = {
   loadVideoById(id: string, startSeconds?: number): void;
   cueVideoById(id: string, startSeconds?: number): void;
@@ -151,10 +153,9 @@ export default function YouTube() {
   const [historyOn, setHistoryOn] = useState<boolean | null>(null);
   const [lyricsOn, setLyricsOn] = useState(true);
   const [atEnd, setAtEnd] = useState(false);
-  // What For you opens on: your own favourites, or the chart before you have any.
-  const [picks, setPicks] = useState<{ tracks: Track[]; mine: boolean } | null>(
-    null,
-  );
+  // What For you opens on: YouTube Music's Quick picks through extension/, else your own
+  // favourites, else the chart before you have any.
+  const [picks, setPicks] = useState<Picks | null>(null);
   const [similar, setSimilar] = useState<{ seed: Track; tracks: Track[] } | null>(
     null,
   );
@@ -334,11 +335,13 @@ export default function YouTube() {
       ...mostPlayed(yt, 0, 12).map((x) => x.track),
       ...getRecent().filter(isYouTube),
     ].filter((t) => !seen.has(t.id) && seen.add(t.id));
-    if (mine.length)
-      return setPicks({ tracks: shuffled(mine.slice(0, 12)), mine: true });
+    // YouTube's picks may have landed first, and outrank these.
+    const keep = (next: Picks) =>
+      setPicks((p) => (p?.from === "youtube" ? p : next));
+    if (mine.length) return keep({ tracks: shuffled(mine.slice(0, 12)), from: "mine" });
     if (!hasKey) return;
     const chart = await musicChart().catch(() => []);
-    setPicks({ tracks: chart.slice(0, 12), mine: false });
+    keep({ tracks: chart.slice(0, 12), from: "chart" });
   }
 
   /** A pick starts a station: the song now, its Mix right behind it, or the rest of its search results. */
@@ -449,7 +452,7 @@ export default function YouTube() {
   }, [view, hasQueue]);
 
   // "More like" your top song, read once from its Mix.
-  const seedPick = picks?.mine ? picks.tracks[0] : undefined;
+  const seedPick = picks && picks.from !== "chart" ? picks.tracks[0] : undefined;
   useEffect(() => {
     if (!apiReady || !seedPick || !hasKey) return;
     let gone = false;
@@ -478,18 +481,29 @@ export default function YouTube() {
       .catch(() => {});
   }, [track]);
 
-  // extension/ answers this ping; without it, nothing heard here reaches YouTube history.
+  // extension/ answers this ping; without it, nothing heard here reaches YouTube history,
+  // and For you can't have YouTube Music's own picks.
   useEffect(() => {
     let on = false;
+    let gone = false;
     const hear = (e: MessageEvent) => {
-      if (e.source !== window || !e.data?.ytHistoryReady) return;
-      on = true;
-      setHistoryOn(true);
+      if (e.source !== window) return;
+      if (e.data?.ytHistoryReady && !on) {
+        on = true;
+        setHistoryOn(true);
+        if (hasKey) window.postMessage({ ytPicksAsk: true }, location.origin);
+      }
+      const ids = e.data?.ytPicks;
+      if (Array.isArray(ids) && ids.length)
+        videos(ids.slice(0, 18))
+          .then((tracks) => !gone && tracks.length && setPicks({ tracks, from: "youtube" }))
+          .catch(() => {});
     };
     addEventListener("message", hear);
     window.postMessage({ ytHistoryPing: true }, location.origin);
     const id = setTimeout(() => !on && setHistoryOn(false), 1500);
     return () => {
+      gone = true;
       removeEventListener("message", hear);
       clearTimeout(id);
     };
@@ -887,15 +901,21 @@ export default function YouTube() {
                     />
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-semibold uppercase tracking-widest text-label-2 @lg:text-xxs">
-                        {picks.mine ? "For you" : "Popular now"}
+                        {picks.from === "youtube"
+                          ? "From your YouTube"
+                          : picks.from === "mine"
+                            ? "For you"
+                            : "Popular now"}
                       </p>
                       <h2 className="mt-1 hidden text-3xl font-semibold tracking-tight @lg:block">
                         {greeting()}
                       </h2>
                       <p className="mt-0.5 line-clamp-2 max-w-md text-xxs text-label-2 @lg:mt-1.5 @lg:text-[15px]">
-                        {picks.mine
-                          ? "The songs you keep coming back to, with more like them after."
-                          : "What's popular on YouTube right now. Your own picks show up here as you listen."}
+                        {picks.from === "youtube"
+                          ? "YouTube Music's quick picks for you, with more like them after."
+                          : picks.from === "mine"
+                            ? "The songs you keep coming back to, with more like them after."
+                            : "What's popular on YouTube right now. Your own picks show up here as you listen."}
                       </p>
                       <div className="mt-2.5 flex gap-2 @lg:mt-4">
                         <button

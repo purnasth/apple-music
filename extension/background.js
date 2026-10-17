@@ -39,7 +39,42 @@ async function report({ id, t, len }) {
   }
 }
 
+// YouTube Music's Quick picks for the signed-in account: the home page carries its
+// first shelves as hex-escaped JSON. Kept 30 minutes so every visit isn't a 800 KB fetch.
+const PICKS_TTL = 30 * 60 * 1000;
+
+async function picks() {
+  const { cached } = await chrome.storage.session.get("cached");
+  if (cached && Date.now() - cached.at < PICKS_TTL) return cached.ids;
+  const html = await (await fetch("https://music.youtube.com/", { credentials: "include" })).text();
+  const m = /initialData\.push\(\{path: '\\\/browse', params: JSON\.parse\('[^']*'\), data: '([^']+)'\}\);/.exec(html);
+  if (!m) throw new Error("no home feed: signed out of YouTube Music, or its page changed");
+  const data = JSON.parse(
+    m[1].replace(/\\x([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\\\/g, "\\"),
+  );
+  const shelves =
+    data.contents?.singleColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents ?? [];
+  // Quick picks is the shelf of song rows; matched by shape, since its title follows the account's language.
+  const shelf = shelves
+    .map((s) => s.musicCarouselShelfRenderer)
+    .find((c) => c?.contents?.[0]?.musicResponsiveListItemRenderer);
+  const ids = (shelf?.contents ?? [])
+    .map((c) => c.musicResponsiveListItemRenderer?.playlistItemData?.videoId)
+    .filter(Boolean);
+  await chrome.storage.session.set({ cached: { ids, at: Date.now() } });
+  return ids;
+}
+
 let queue = Promise.resolve();
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (msg.picks) {
+    picks()
+      .then(reply)
+      .catch((e) => {
+        console.warn("YouTube picks:", e.message);
+        reply([]);
+      });
+    return true;
+  }
   queue = queue.then(() => report(msg)).catch((e) => console.warn("YouTube history:", e.message));
 });
