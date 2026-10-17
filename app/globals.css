@@ -917,3 +917,23 @@ html[data-vt="prev"] {
     opacity: 1;
   }
 }
+
+/* The playing mood mix's icon in the player bar, breathing in its own colour. */
+.mood-glow {
+  animation: mood-glow 2.8s ease-in-out infinite;
+}
+@keyframes mood-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 var(--glow));
+  }
+  50% {
+    filter: drop-shadow(0 0 5px var(--glow));
+  }
+}
+/* A near-zero duration would pulse this loop at frame rate. */
+@media (prefers-reduced-motion: reduce) {
+  .mood-glow {
+    animation: none;
+  }
+}

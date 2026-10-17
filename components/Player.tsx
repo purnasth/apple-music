@@ -118,6 +118,8 @@ type Props = {
   onGoTo: (kind: "artist" | "album", name: string) => void;
   /** A song has been listened to long enough to count as a play. */
   onPlayed: (t: Track) => void;
+  /** More buttons, for the bar or the full player's round ones. */
+  extra?: (where: "bar" | "full") => React.ReactNode;
 };
 
 export default function Player({
@@ -129,6 +131,7 @@ export default function Player({
   onAddTo,
   onGoTo,
   onPlayed,
+  extra,
 }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(audioPool()[0] ?? null);
   const graph = useRef<{ ctx: AudioContext; an: AnalyserNode } | null>(null);
@@ -959,6 +962,7 @@ export default function Player({
           }}
           onClose={() => setFull(false)}
           onMini={mini.supported ? mini.toggle : undefined}
+          extra={extra?.("full")}
           mini={mini.isOpen}
           cast={
             castable
@@ -1014,6 +1018,7 @@ export default function Player({
             <TbPictureInPicture />
           </Btn>
         )}
+        {extra?.("bar")}
       </PlayerBar>
     </>
   );
@@ -1699,7 +1704,9 @@ function FullView({
   mini,
   fader,
   cast,
+  extra,
 }: {
+  extra?: React.ReactNode;
   track: Track;
   queue: Track[];
   path: number[];
@@ -2026,6 +2033,7 @@ function FullView({
                     onGoTo={onGoTo}
                     fader={fader}
                   />
+                  {extra}
                 </div>
               </div>
             </div>

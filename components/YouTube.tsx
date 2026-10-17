@@ -27,13 +27,18 @@ import { backdropDim } from "@/lib/tone";
 import { loopPath, waveHeights, waveStops } from "@/lib/wave";
 import { ClearButton, RecentStrip, Row, SkeletonRows } from "@/components/Row";
 import { AddToSheet, MonthSection, Mosaic } from "@/components/Playlists";
+import { MixDot, MoodPill, MoodSheet } from "@/components/Moods";
 import LyricsPanel from "@/components/Lyrics";
 import { getLyrics } from "@/lib/lyrics";
 import { toast } from "@/lib/toast";
 import {
+  Mood,
   Plays,
   Playlists,
   Track,
+  fixMood,
+  getLibrary,
+  getMoodFixes,
   getPlays,
   getPlaylists,
   getRecent,
@@ -52,6 +57,7 @@ import {
   hasKey,
   isYouTube,
   musicChart,
+  onYouTube,
   resumeAt,
   saveResume,
   saveYtSession,
@@ -161,6 +167,11 @@ export default function YouTube() {
   );
 
   const [addTo, setAddTo] = useState<Track | null>(null);
+  // The mood picker, or with a track, the sheet that sets that song's mood.
+  const [moodFor, setMoodFor] = useState<{ track?: Track } | null>(null);
+  // A mood's station, known by the song it started from: any other station replaces that song.
+  const [mix, setMix] = useState<{ mood: Mood; seed: string } | null>(null);
+  const mood = mix && queue[0]?.id === mix.seed ? mix.mood : null;
   const [playlists, setPlaylists] = useState<Playlists>({});
   const [recent, setRecent] = useState<Track[]>([]);
   const [plays, setPlays] = useState<Plays>({});
@@ -354,6 +365,33 @@ export default function YouTube() {
     setShuffle(false);
     setQueue([t]);
     play(0, [t]);
+  }
+
+  /** Sets a song's mood by hand; one that no longer fits the playing mix is skipped. */
+  function setMood(t: Track, m: Mood) {
+    fixMood(t, m);
+    const skip = !!mood && m !== mood && track?.id === t.id && index + 1 < queue.length;
+    if (skip) play(index + 1);
+    toast.success(`Moved to ${m}`, {
+      description: skip ? `${t.title} is out of this mix.` : t.title,
+    });
+  }
+
+  /** A mood starts a station from a random library song of that mood. */
+  async function playMood(m: Mood) {
+    const pool = (await getLibrary()).filter((t) => t.mood === m);
+    const seed = pool[Math.floor(Math.random() * pool.length)];
+    try {
+      const hit = seed && (await onYouTube(seed));
+      if (!hit) throw new Error(`No ${m.toLowerCase()} songs found.`);
+      startRadio(hit);
+      setMix({ mood: m, seed: hit.id });
+      setView("next");
+    } catch (e) {
+      toast.error(`Couldn't start a ${m.toLowerCase()} station`, {
+        description: (e as Error).message,
+      });
+    }
   }
 
   useEffect(() => {
@@ -774,6 +812,9 @@ export default function YouTube() {
                   : ""}
             </button>
           ))}
+          {hasKey && (
+            <MoodPill mix={mood} onClick={() => setMoodFor({})} />
+          )}
           {historyOn !== null && <HistoryStatus on={historyOn} />}
           {view === "next" && track && (
             <div className="ml-auto hidden items-center gap-1 lg:flex">
@@ -1098,6 +1139,14 @@ export default function YouTube() {
           >
             <TbExternalLink />
           </a>
+          {mood && (
+            <MixDot
+              mood={mood}
+              playing={playing}
+              label={`${mood} mix: not ${mood.toLowerCase()}? Change this song's mood`}
+              onClick={() => setMoodFor({ track })}
+            />
+          )}
         </PlayerBar>
       )}
 
@@ -1108,6 +1157,18 @@ export default function YouTube() {
       />
 
       <TabBar current="youtube" />
+
+      {moodFor && (
+        <MoodSheet
+          title={moodFor.track ? `What mood is “${moodFor.track.title.split(" | ")[0]}”?` : "How are you feeling?"}
+          current={
+            (moodFor.track && getMoodFixes()[moodFor.track.id]) || (mood ?? undefined)
+          }
+          onPick={(m) => (moodFor.track ? setMood(moodFor.track, m) : playMood(m))}
+          onOff={mood ? () => setMix(null) : undefined}
+          onClose={() => setMoodFor(null)}
+        />
+      )}
 
       {addTo && (
         <AddToSheet
