@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Music by Purna: YouTube history",
-  "version": "2.0",
-  "description": "Adds songs heard on music.purnashrestha.com.np to your YouTube watch history.",
+  "version": "2.1",
+  "description": "Adds songs heard on music.purnashrestha.com.np to your YouTube watch history, and brings your YouTube Music Quick picks to its For you page.",
   "icons": {
     "16": "icons/16.png",
     "32": "icons/32.png",
@@ -18,6 +18,9 @@
     },
     "default_title": "Saves songs heard on Music by Purna to your YouTube watch history"
   },
+  "permissions": [
+    "storage"
+  ],
   "host_permissions": [
     "https://*.youtube.com/*"
   ],
