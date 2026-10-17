@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Music by Purna: YouTube history",
+  "version": "2.0",
+  "description": "Adds songs heard on music.purnashrestha.com.np to your YouTube watch history.",
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    },
+    "default_title": "Saves songs heard on Music by Purna to your YouTube watch history"
+  },
+  "host_permissions": [
+    "https://*.youtube.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://music.purnashrestha.com.np/*",
+        "http://localhost:3000/*"
+      ],
+      "js": [
+        "site.js"
+      ]
+    }
+  ]
+}
