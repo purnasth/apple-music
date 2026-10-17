@@ -15,6 +15,13 @@ no backend to run.
 
 - **Library.** Hundreds of full-length songs ship with the site, grouped into
   folders. Filter by folder or artist, sort it, and link to a filtered view.
+- **Moods.** "How are you feeling?" plays a mix of Energetic, Happy, Chill,
+  Romantic or Sad songs from the library. `pnpm songs` hears each new song once
+  with [Essentia](https://essentia.upf.edu/models.html)'s mood models (free for
+  non-commercial use; downloaded on first run) and weighs in its lyrics. A
+  song's mood can be changed from its menu, or from the player during a mix;
+  changes are kept in the browser. On `/youtube` a mood starts a Mix from one of
+  those songs, which costs one search the first time that song is used.
 - **Search.** Searches the streaming catalogue through Deezer's public API (no
   key) for 30-second previews. Every result links out to Apple Music for full
   playback. You can also search the library by a line of its lyrics: Nepali and

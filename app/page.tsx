@@ -19,6 +19,7 @@ import {
 } from "react-icons/tb";
 import { toast } from "@/lib/toast";
 import Player from "@/components/Player";
+import { MixDot, MoodCard, MoodSheet } from "@/components/Moods";
 import {
   AddToSheet,
   PlaylistsView,
@@ -48,6 +49,9 @@ import {
   savePlaylists,
   shuffled,
   artistsOf,
+  fixMood,
+  MOODS,
+  type Mood,
 } from "@/lib/music";
 import { findLyrics, lyricDoc, LyricDoc } from "@/lib/find";
 import { isYouTube, saveYtSession } from "@/lib/youtube";
@@ -109,6 +113,10 @@ export default function Home() {
   const [sharedOpen, setSharedOpen] = useState(false);
   const [smartOpen, setSmartOpen] = useState(false);
   const [addTo, setAddTo] = useState<Track | null>(null);
+  // The mood picker, or with a track, the sheet that sets that song's mood.
+  const [moodFor, setMoodFor] = useState<{ track?: Track } | null>(null);
+  // The mood whose mix is playing, until something else is played.
+  const [mix, setMix] = useState<Mood | null>(null);
 
   const [queue, setQueue] = useState<Track[]>([]);
   const [qIndex, setQIndex] = useState(0);
@@ -303,6 +311,7 @@ export default function Home() {
 
   /** YouTube songs play in YouTube's player, so a list splits by where its pick plays. */
   const play = (tracks: Track[], i: number) => {
+    setMix(null);
     const yt = isYouTube(tracks[i]);
     const list = tracks.filter((t) => isYouTube(t) === yt);
     const at = list.indexOf(tracks[i]);
@@ -328,6 +337,34 @@ export default function Home() {
     toast.success(shuffle ? `Shuffling ${what}` : `Playing ${what}`, {
       id: "queue",
       description: `${tracks.length} song${tracks.length === 1 ? "" : "s"} queued.`,
+    });
+  };
+
+  const playMood = (m: Mood) => {
+    playAll(library.filter((t) => t.mood === m), true, `your ${m.toLowerCase()} mix`);
+    setMix(m);
+  };
+
+  /** Back from a mood mix to the whole library, without interrupting the song playing. */
+  const endMix = () => {
+    const now = queue[qIndex];
+    setMix(null);
+    if (!now) return;
+    setQueue([now, ...shuffled(library.filter((t) => t.id !== now.id))]);
+    setQIndex(0);
+    toast.success("Mood off", { description: "Carrying on with your whole library." });
+  };
+
+  /** Sets a song's mood by hand; one that no longer fits the playing mix is skipped. */
+  const setMood = (t: Track, m: Mood) => {
+    fixMood(t, m);
+    const fix = (list: Track[]) => list.map((x) => (x.id === t.id ? { ...x, mood: m } : x));
+    setLibrary(fix);
+    setQueue(fix);
+    const skip = !!mix && m !== mix && queue[qIndex]?.id === t.id && qIndex + 1 < queue.length;
+    if (skip) jumpTo(qIndex + 1);
+    toast.success(`Moved to ${m}`, {
+      description: skip ? `${t.title} is out of this mix.` : t.title,
     });
   };
 
@@ -843,6 +880,7 @@ export default function Home() {
 
         {tab === "library" && !!library.length && (
           <div className="mb-4 space-y-3">
+            {library.some((t) => t.mood) && <MoodCard mix={mix} onOpen={() => setMoodFor({})} />}
             {folders.length > 1 && (
               <div className="flex flex-wrap gap-2">
                 {[null, ...folders].map((f) => (
@@ -1195,7 +1233,23 @@ export default function Home() {
           onToggle={(name) => togglePlaylist(name, addTo)}
           onCreate={(name) => createPlaylist(name, [addTo])}
           onQueue={(mode) => enqueue(addTo, mode)}
+          onMood={() => setMoodFor({ track: addTo })}
           onClose={() => setAddTo(null)}
+        />
+      )}
+
+      {moodFor && (
+        <MoodSheet
+          title={moodFor.track ? `What mood is “${moodFor.track.title}”?` : "How are you feeling?"}
+          current={moodFor.track ? moodFor.track.mood : (mix ?? undefined)}
+          counts={
+            moodFor.track
+              ? undefined
+              : Object.fromEntries(MOODS.map((m) => [m, library.filter((t) => t.mood === m).length]))
+          }
+          onPick={(m) => (moodFor.track ? setMood(moodFor.track, m) : playMood(m))}
+          onOff={mix ? endMix : undefined}
+          onClose={() => setMoodFor(null)}
         />
       )}
 
@@ -1220,6 +1274,18 @@ export default function Home() {
         onAddTo={setAddTo}
         onGoTo={goTo}
         onPlayed={(t) => setPlays(recordPlay(t))}
+        extra={(where) =>
+          mix &&
+          queue[qIndex] && (
+            <MixDot
+              mood={mix}
+              playing={playing}
+              full={where === "full"}
+              label={`${mix} mix: not ${mix.toLowerCase()}? Change this song's mood`}
+              onClick={() => setMoodFor({ track: queue[qIndex] })}
+            />
+          )
+        }
       />
 
       <TabBar current={tab} onTab={setTab} />

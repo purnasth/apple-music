@@ -10,6 +10,7 @@ import {
   TbCheck,
   TbDownload,
   TbLibrary,
+  TbMoodEdit,
   TbMusic,
   TbPencil,
   TbPlayerPlayFilled,
@@ -125,6 +126,7 @@ export function AddToSheet({
   onToggle,
   onCreate,
   onQueue,
+  onMood,
   onClose,
 }: {
   track: Track;
@@ -132,6 +134,8 @@ export function AddToSheet({
   onToggle: (name: string) => void;
   onCreate: (name: string) => void;
   onQueue: (mode: "next" | "end") => void;
+  /** Opens the mood picker for this song; the row only shows for songs with a mood. */
+  onMood?: () => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -200,6 +204,20 @@ export function AddToSheet({
           }}
         />
       </Section>
+
+      {onMood && track.mood && (
+        <Section label="Mood">
+          <SheetRow
+            icon={<TbMoodEdit size={16} />}
+            title={track.mood}
+            subtitle="Feels different? Change it"
+            onClick={() => {
+              close();
+              onMood();
+            }}
+          />
+        </Section>
+      )}
 
       {!!names.length && (
         <Section label="Playlists">

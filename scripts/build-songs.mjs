@@ -6,13 +6,15 @@
 // just a URL, so reaching its embedded art means downloading the file's moov box — 35.9 MB
 // across this library, and a third of the files keep moov at the very end. Extracted and
 // downscaled they are 1.4 MB, served as plain images.
-import { readdir, mkdir, writeFile, rm, stat } from 'node:fs/promises';
+import { readdir, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { parseFile } from 'music-metadata';
 import { attachWords } from './words-key.mjs';
+import { moodsOf } from '../lib/mood.ts';
+import { HEADS, modelFile } from './hear-models.mjs';
 
 const run = promisify(execFile);
 const SONGS = 'public/songs';
@@ -35,8 +37,44 @@ const walk = async (dir) => {
 await mkdir(ART, { recursive: true });
 await mkdir(LYRICS, { recursive: true });
 
+// Keyed on the preview URL (which carries the file size), so only new audio is heard.
+const HEARD = 'node_modules/.cache/song-mood.json';
+const heardCache = JSON.parse(await readFile(HEARD, 'utf8').catch(() => '{}'));
+
+/** Essentia's mood scores for each file, by path, from parallel hear.mjs workers. */
+async function hearAll(paths) {
+  if (!paths.length) return {};
+  try {
+    for (const name of [undefined, ...Object.keys(HEADS)]) await modelFile(name);
+  } catch (e) {
+    console.warn(`\n⚠ Skipping moods: ${String(e.message ?? e).split('\n')[0]}\n`);
+    return {};
+  }
+  const workers = Math.min(4, paths.length);
+  console.log(`Hearing ${paths.length} new song(s) for their mood, ${workers} at a time (~3 s a song)…`);
+  const out = {};
+  await Promise.all(
+    Array.from({ length: workers }, (_, w) =>
+      run(process.execPath, ['scripts/hear.mjs', ...paths.filter((_, i) => i % workers === w)], {
+        maxBuffer: 1 << 26,
+      })
+        .then(({ stdout, stderr }) => {
+          process.stderr.write(stderr.replace(/^.*Deprecation.*\n|^\(Use `node.*\n/gm, ''));
+          for (const line of stdout.split('\n').filter(Boolean)) {
+            const { file, scores } = JSON.parse(line);
+            out[file] = scores;
+          }
+        })
+        .catch((e) => console.warn(`⚠ A mood worker failed: ${String(e.message ?? e).split('\n')[0]}`)),
+    ),
+  );
+  return out;
+}
+
 const files = (await walk(SONGS)).sort();
 const tracks = [];
+/** preview -> the file it was read from and its lyric text, for hearing moods. */
+const sources = new Map();
 /** hash -> whether its two sizes are actually on disk. */
 const covers = new Map();
 const lyricsKeep = new Set();
@@ -99,6 +137,10 @@ for (const file of files) {
     lyrics = `/songs-lyrics/${name}`;
   }
 
+  // ?v= makes the URL change when the file does, so the service worker's
+  // cache (keyed by full URL) can never serve a stale copy of a replaced
+  // song. Old versions linger in the cache until its activate cleanup.
+  const preview = `/songs/${parts.map(encodeURIComponent).join('/')}?v=${(await stat(file)).size}`;
   tracks.push({
     // Each path segment encoded separately: these names carry spaces, commas and parentheses.
     id: `file:${parts.join('/')}`,
@@ -107,15 +149,24 @@ for (const file of files) {
     album,
     artwork,
     artworkLarge,
-    // ?v= makes the URL change when the file does, so the service worker's
-    // cache (keyed by full URL) can never serve a stale copy of a replaced
-    // song. Old versions linger in the cache until its activate cleanup.
-    preview: `/songs/${parts.map(encodeURIComponent).join('/')}?v=${(await stat(file)).size}`,
+    preview,
     duration,
     lyrics,
     folder: parts.length > 1 ? parts.at(-2) : undefined,
   });
+  sources.set(preview, { file, words });
 }
+
+const unheard = [...sources].filter(([preview]) => !heardCache[preview]);
+const fresh = await hearAll(unheard.map(([, s]) => s.file));
+for (const [preview, { file }] of unheard) if (fresh[file]) heardCache[preview] = fresh[file];
+
+const felt = tracks.filter((t) => heardCache[t.preview]);
+moodsOf(felt.map((t) => ({ heard: heardCache[t.preview], lyrics: sources.get(t.preview).words }))).forEach(
+  (mood, i) => (felt[i].mood = mood),
+);
+await mkdir('node_modules/.cache', { recursive: true });
+await writeFile(HEARD, JSON.stringify(Object.fromEntries(felt.map((t) => [t.preview, heardCache[t.preview]]))));
 
 tracks.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 
@@ -134,7 +185,7 @@ for (const name of await readdir(LYRICS)) {
 }
 
 const artBytes = (await Promise.all(names.map((n) => stat(join(ART, n))))).reduce((s, f) => s + f.size, 0);
-console.log(`${tracks.length} tracks, ${written.length} covers at two sizes (${(artBytes / 1e6).toFixed(1)} MB), ${lyricsKeep.size} lyric sheets, ${worded} timed to the word`);
+console.log(`${tracks.length} tracks, ${written.length} covers at two sizes (${(artBytes / 1e6).toFixed(1)} MB), ${lyricsKeep.size} lyric sheets, ${worded} timed to the word, ${felt.length} with a mood`);
 if (failed.length) {
   console.warn(`\n${failed.length} cover(s) could not be converted; those tracks ship without art:`);
   for (const f of failed) console.warn(`  ${f}`);

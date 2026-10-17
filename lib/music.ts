@@ -1,6 +1,9 @@
 import { createStore, set, get, del, values, type UseStore } from 'idb-keyval';
 import type { Source } from './youtube';
 
+export const MOODS = ['Energetic', 'Happy', 'Chill', 'Romantic', 'Sad'] as const;
+export type Mood = (typeof MOODS)[number];
+
 export type Track = {
   id: string;
   title: string;
@@ -23,6 +26,8 @@ export type Track = {
   aspect?: number;
   /** The YouTube channel that uploaded it. */
   channel?: string;
+  /** Guessed from the audio and lyrics by `pnpm songs`, unless the listener set it. */
+  mood?: Mood;
 };
 
 /* ---------- Deezer search (public API, no key) ----------
@@ -174,9 +179,28 @@ async function bundled(): Promise<Track[]> {
   }
 }
 
+const MOOD_FIXES_KEY = 'mood-fixes';
+
+/** Moods the listener set by hand, by track id; they win over the guessed ones. */
+export function getMoodFixes(): Record<string, Mood> {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(localStorage.getItem(MOOD_FIXES_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+export function fixMood(t: Track, mood: Mood) {
+  localStorage.setItem(MOOD_FIXES_KEY, JSON.stringify({ ...getMoodFixes(), [t.id]: mood }));
+}
+
 export async function getLibrary(): Promise<Track[]> {
   const records = (await values(meta())) as MetaRecord[];
-  const all = [...(await bundled()), ...records.map(localTrack)];
+  const fixes = getMoodFixes();
+  const all = [...(await bundled()), ...records.map(localTrack)].map((t) =>
+    fixes[t.id] ? { ...t, mood: fixes[t.id] } : t,
+  );
   return all.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
 }
 

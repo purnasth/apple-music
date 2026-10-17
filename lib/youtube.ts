@@ -183,3 +183,20 @@ export function resumeAt(t: Track) {
   const at = getResume()[t.id];
   return at && (!t.duration || at / t.duration < 0.9) ? at : undefined;
 }
+
+/* Library songs found on YouTube, so a mood seeded from one again costs no search. */
+const KEY_SEEDS = "yt-mood-seeds";
+
+/** The YouTube video for a library song: a 100-unit search the first time, free after. */
+export async function onYouTube(t: Track): Promise<Track | undefined> {
+  let seeds: Record<string, Track> = {};
+  try {
+    seeds = JSON.parse(localStorage.getItem(KEY_SEEDS) ?? "{}");
+  } catch {}
+  if (seeds[t.id]) return seeds[t.id];
+  const [hit] = await searchYouTube(`${t.artist} ${t.title}`);
+  if (!hit) return;
+  seeds[t.id] = hit;
+  localStorage.setItem(KEY_SEEDS, JSON.stringify(seeds));
+  return hit;
+}
