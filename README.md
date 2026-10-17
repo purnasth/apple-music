@@ -24,6 +24,9 @@ no backend to run.
   from YouTube's Mix, and the queue keeps refilling the same way when it runs
   out. YouTube songs go into playlists, Recently Played and Most Played like any
   other. Search needs a free `NEXT_PUBLIC_YT_KEY` (see `.env.example`).
+  YouTube doesn't put plays in its embedded player into your watch history, so
+  a small Chrome extension does it: set it up from
+  [`extension/README.md`](extension/README.md).
 - **Player.**
   - Play/pause, prev/next, seek, volume, shuffle and repeat one.
   - Crossfade between songs, and gapless starts.
@@ -97,4 +100,5 @@ lib/shortcuts.ts            the keyboard map
 public/sw.js                service worker: offline app, song cache, Range requests
 scripts/build-songs.mjs     indexes public/songs into songs.json
 scripts/align-lyrics.mjs    runs whisper.cpp over the library for lib/align.ts
+extension/                  Chrome extension: puts /youtube plays in YouTube watch history
 ```

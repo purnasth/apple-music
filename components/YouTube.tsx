@@ -4,7 +4,11 @@ import { CSSProperties, RefObject, useEffect, useId, useRef, useState } from "re
 import {
   TbArrowsShuffle,
   TbBrandYoutube,
+  TbClock,
+  TbArrowUpRight,
   TbExternalLink,
+  TbHistory,
+  TbHistoryOff,
   TbMicrophone2,
   TbPlayerPlayFilled,
   TbArrowsMaximize,
@@ -12,6 +16,7 @@ import {
   TbPlaylistAdd,
   TbSearch,
   TbShare3,
+  TbUserCircle,
   TbViewportNarrow,
   TbViewportWide,
 } from "react-icons/tb";
@@ -143,6 +148,7 @@ export default function YouTube() {
   const [apiReady, setApiReady] = useState(false);
   // Up next with the video across the page and the list below, as YouTube's theater.
   const [theater, setTheater] = useState(false);
+  const [historyOn, setHistoryOn] = useState<boolean | null>(null);
   const [lyricsOn, setLyricsOn] = useState(true);
   const [atEnd, setAtEnd] = useState(false);
   // What For you opens on: your own favourites, or the chart before you have any.
@@ -472,6 +478,23 @@ export default function YouTube() {
       .catch(() => {});
   }, [track]);
 
+  // extension/ answers this ping; without it, nothing heard here reaches YouTube history.
+  useEffect(() => {
+    let on = false;
+    const hear = (e: MessageEvent) => {
+      if (e.source !== window || !e.data?.ytHistoryReady) return;
+      on = true;
+      setHistoryOn(true);
+    };
+    addEventListener("message", hear);
+    window.postMessage({ ytHistoryPing: true }, location.origin);
+    const id = setTimeout(() => !on && setHistoryOn(false), 1500);
+    return () => {
+      removeEventListener("message", hear);
+      clearTimeout(id);
+    };
+  }, []);
+
   // The iframe has no time events, so the clock is polled.
   useEffect(() => {
     if (!playing || !track) return;
@@ -479,6 +502,9 @@ export default function YouTube() {
     let at = 0;
     let len = 0;
     let saved = 0;
+    // Read by extension/, which reports the watch to YouTube's history.
+    const watched = (t: number, len: number) =>
+      window.postMessage({ ytWatched: { id: videoId(track), t, len } }, location.origin);
     const id = setInterval(() => {
       const p = player.current;
       if (!p) return;
@@ -497,11 +523,15 @@ export default function YouTube() {
       const mark = Math.min(30, (d || 60) / 2);
       const was = lastTime.current;
       lastTime.current = t;
-      if (was < mark && t >= mark && t - was < 2) setPlays(recordPlay(track));
+      if (was < mark && t >= mark && t - was < 2) {
+        setPlays(recordPlay(track));
+        watched(t, d);
+      }
     }, 500);
     return () => {
       clearInterval(id);
       if (len) setResume(saveResume(track, at, len));
+      if (len && at >= Math.min(30, len / 2)) watched(at, len);
     };
   }, [playing, track]);
 
@@ -730,6 +760,7 @@ export default function YouTube() {
                   : ""}
             </button>
           ))}
+          {historyOn !== null && <HistoryStatus on={historyOn} />}
           {view === "next" && track && (
             <div className="ml-auto hidden items-center gap-1 lg:flex">
               <Btn
@@ -1099,6 +1130,85 @@ const shape = (seed: string, n: number) =>
   waveHeights(seed, n).map((h) => 0.05 + 0.95 * ((h - 0.3) / 0.7) ** 2.2);
 
 /** Up next's wave: loops that rise and fall in place, shaped by the playhead, so a seek reshapes it. */
+const EXTENSION_URL = "https://github.com/purnasth/apple-music/tree/main/extension#setup";
+
+/** Whether plays here reach YouTube watch history, and how to make them. Desktop only: phones can't run the extension. */
+function HistoryStatus({ on }: { on: boolean }) {
+  return (
+    <div className="group relative hidden md:block">
+      <button
+        aria-describedby="yt-history-card"
+        className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition ${
+          on
+            ? "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25"
+            : "bg-accent/15 text-accent hover:bg-accent/25"
+        }`}
+      >
+        {on ? <TbHistory size={14} /> : <TbHistoryOff size={14} />}
+        YouTube history {on ? "on" : "off"}
+      </button>
+      <div
+        id="yt-history-card"
+        role="tooltip"
+        className="invisible absolute left-0 top-full z-30 pt-2 opacity-0 transition group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
+      >
+        <div className="glass-thick w-72 overflow-hidden rounded-card text-xs text-label-2 shadow-2xl shadow-black/50 ring-1 ring-white/10">
+          <div className="flex items-center gap-3 px-4 pb-3 pt-4">
+            <span
+              className={`grid size-9 shrink-0 place-items-center rounded-full ${
+                on ? "bg-emerald-500/15 text-emerald-400" : "bg-accent/15 text-accent"
+              }`}
+            >
+              {on ? <TbHistory size={18} /> : <TbHistoryOff size={18} />}
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-label">
+                {on ? "Saving to your history" : "Not saving to your history"}
+              </p>
+              <p>{on ? "YouTube learns from what you play." : "YouTube doesn't count plays here."}</p>
+            </div>
+          </div>
+          {on ? (
+            <ul className="space-y-2 px-4 pb-4">
+              <li className="flex items-center gap-2.5">
+                <TbClock size={15} className="shrink-0 text-label-3" />A song counts after 30 seconds
+              </li>
+              <li className="flex items-center gap-2.5">
+                <TbUserCircle size={15} className="shrink-0 text-label-3" />
+                For the YouTube account signed in here
+              </li>
+            </ul>
+          ) : (
+            <ol className="space-y-2 px-4 pb-4">
+              {[
+                "Sign in to YouTube in this browser",
+                "Add the history extension (desktop Chrome)",
+                "Reload this page",
+              ].map((step, i) => (
+                <li key={step} className="flex items-center gap-2.5">
+                  <span className="grid size-4 shrink-0 place-items-center rounded-full bg-fill-2 text-[10px] font-semibold text-label">
+                    {i + 1}
+                  </span>
+                  {step}
+                </li>
+              ))}
+            </ol>
+          )}
+          <a
+            href={EXTENSION_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center justify-between border-t border-separator px-4 py-2.5 font-medium text-label transition hover:bg-fill"
+          >
+            {on ? "How it works" : "Set up the extension"}
+            <TbArrowUpRight size={14} className="text-label-3" />
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Pulse({
   seed,
   playing,
